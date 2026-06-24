@@ -6,7 +6,9 @@
     "orientation": "portrait",
     "scheme": "pileap",
     "userInterfaceStyle": "light",
+    "icon": "./assets/images/icon.png",
     "splash": {
+      "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#7C3AED"
     },
@@ -16,6 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#7C3AED"
       },
       "package": "com.pileap.app",

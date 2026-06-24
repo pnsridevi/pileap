@@ -3,17 +3,20 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path, Line, Rect, Circle } from 'react-native-svg';
+import Svg, { Path, Line, Rect, Circle, Polyline } from 'react-native-svg';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
+import AccountsTab from './accounts';
 
 type SubTab = 'feed' | 'budget' | 'categories' | 'accounts';
 
 const SUBTABS: { key: SubTab; label: string }[] = [
-  { key: 'feed',       label: 'Transactions' },
+  { key: 'feed',       label: 'Feed' },
   { key: 'budget',     label: 'Budget vs Actual' },
   { key: 'categories', label: 'Custom Categories' },
   { key: 'accounts',   label: 'Accounts' },
 ];
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function FileIcon() {
   return (
@@ -26,10 +29,11 @@ function FileIcon() {
   );
 }
 
-function BoxIcon() {
+function CheckIcon() {
   return (
     <Svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke={colors.muted} strokeWidth={1.5}>
-      <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <Path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <Polyline points="22 4 12 14.01 9 11.01" />
     </Svg>
   );
 }
@@ -53,64 +57,22 @@ function TagIcon() {
   );
 }
 
-function FeedEmpty() {
+// ─── Feed sub-tab ─────────────────────────────────────────────────────────────
+// Two distinct states per arch doc Section 5.3.5:
+//   • neverIngested — transactions table has zero rows for this user
+//   • allReviewed   — all rows have status = user_reviewed
+
+function FeedNeverIngested({ onGoToAccounts }: { onGoToAccounts: () => void }) {
   return (
     <View style={s.emptyWrap}>
       <View style={s.emptyIconBox}><FileIcon /></View>
       <Text style={s.emptyTitle}>No transactions yet</Text>
       <Text style={s.emptySub}>
-        Connect a data source or upload past bank statements to start tracking.
+        Connect a data source to start tracking your spending, income, and investments.
       </Text>
-
-      <View style={s.cardRow}>
-        <View style={s.sourceCard}>
-          <View style={s.sourceCardHead}>
-            <Text style={s.sourceCardTitle}>Bank SMS</Text>
-            <View style={[s.badge, { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
-              <Text style={[s.badgeText, { color: colors.blue }]}>Android</Text>
-            </View>
-          </View>
-          <Text style={s.sourceCardDesc}>
-            Parses bank SMS every 30 min. Covers 40+ Indian banks, UPI, EMI, ATM.
-          </Text>
-          <TouchableOpacity style={s.btnPrimary} activeOpacity={0.8}>
-            <Text style={s.btnPrimaryText}>Enable SMS →</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={s.sourceCard}>
-          <View style={s.sourceCardHead}>
-            <Text style={s.sourceCardTitle}>Email Forward</Text>
-            <View style={[s.badge, { backgroundColor: colors.greenLight }]}>
-              <Text style={[s.badgeText, { color: '#059669' }]}>All devices</Text>
-            </View>
-          </View>
-          <Text style={s.sourceCardDesc}>
-            Forward bank emails to parse@pileap.com. Captures statements, SIPs, receipts.
-          </Text>
-          <TouchableOpacity style={s.btnGhost} activeOpacity={0.8}>
-            <Text style={s.btnGhostText}>Copy email →</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={s.uploadCard}>
-        <View style={s.uploadCardHead}>
-          <Text style={s.sourceCardTitle}>Upload Past Statements</Text>
-          <Text style={s.uploadCardSub}>Score all 9 modules now — no waiting</Text>
-        </View>
-        <View style={s.uploadTypes}>
-          {['Bank PDF', 'CAMS / NSDL', 'EPF Passbook'].map((t) => (
-            <View key={t} style={s.uploadChip}>
-              <Text style={s.uploadChipText}>{t}</Text>
-            </View>
-          ))}
-        </View>
-        <TouchableOpacity style={s.btnPrimary} activeOpacity={0.8}>
-          <Text style={s.btnPrimaryText}>Upload Statements →</Text>
-        </TouchableOpacity>
-      </View>
-
+      <TouchableOpacity style={s.btnPrimary} activeOpacity={0.8} onPress={onGoToAccounts}>
+        <Text style={s.btnPrimaryText}>Connect Data Source →</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={s.manualLink} activeOpacity={0.7}>
         <Text style={s.manualLinkText}>+ Add transaction manually</Text>
       </TouchableOpacity>
@@ -118,17 +80,37 @@ function FeedEmpty() {
   );
 }
 
+function FeedAllReviewed() {
+  return (
+    <View style={s.emptyWrap}>
+      <View style={s.emptyIconBox}><CheckIcon /></View>
+      <Text style={s.emptyTitle}>All transactions reviewed</Text>
+      <Text style={s.emptySub}>
+        You're up to date. Reviewed transactions move to your history.
+      </Text>
+      <TouchableOpacity style={s.btnGhost} activeOpacity={0.8}>
+        <Text style={s.btnGhostText}>View Transaction History →</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Budget sub-tab ───────────────────────────────────────────────────────────
+
 function BudgetEmpty() {
   return (
     <View style={s.emptyWrap}>
       <View style={s.emptyIconBox}><WalletIcon /></View>
       <Text style={s.emptyTitle}>No budget set up yet</Text>
       <Text style={s.emptySub}>
-        Your monthly spending plan will appear here once onboarding is complete. Track Fixed, Living, and Investment categories against actual spend.
+        Your monthly spending plan will appear here once onboarding is complete.
+        Track Fixed, Living, and Investment categories against actual spend.
       </Text>
     </View>
   );
 }
+
+// ─── Custom Categories sub-tab ────────────────────────────────────────────────
 
 function CategoriesEmpty() {
   return (
@@ -136,36 +118,38 @@ function CategoriesEmpty() {
       <View style={s.emptyIconBox}><TagIcon /></View>
       <Text style={s.emptyTitle}>No custom categories yet</Text>
       <Text style={s.emptySub}>
-        When you correct a transaction's category, Pileap remembers it for that merchant. Your saved rules will appear here.
+        When you correct a transaction's category, Pileap remembers it for that
+        merchant. Your saved rules will appear here.
       </Text>
     </View>
   );
 }
 
-function AccountsEmpty() {
-  return (
-    <View style={s.emptyWrap}>
-      <View style={s.emptyIconBox}><BoxIcon /></View>
-      <Text style={s.emptyTitle}>No accounts linked</Text>
-      <Text style={s.emptySub}>
-        Connect Bank SMS or email forwarding to start seeing your linked accounts and data sources here.
-      </Text>
-      <TouchableOpacity style={[s.btnPrimary, { marginTop: spacing.sm }]} activeOpacity={0.8}>
-        <Text style={s.btnPrimaryText}>Set Up Data Source →</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+// Swap these for real store selectors when wired up.
+// neverIngested: transactions table has 0 rows for this user
+// allReviewed:   all rows have status = user_reviewed
+type FeedState = 'neverIngested' | 'allReviewed' | 'hasTransactions';
+const FEED_STATE: FeedState = 'neverIngested';
 
 export default function TransactionsScreen() {
   const [activeTab, setActiveTab] = useState<SubTab>('feed');
 
+  function renderFeed() {
+    switch (FEED_STATE) {
+      case 'neverIngested':   return <FeedNeverIngested onGoToAccounts={() => setActiveTab('accounts')} />;
+      case 'allReviewed':     return <FeedAllReviewed />;
+      case 'hasTransactions': return null; // real transaction list goes here
+    }
+  }
+
   function renderContent() {
     switch (activeTab) {
-      case 'feed':       return <FeedEmpty />;
+      case 'feed':       return renderFeed();
       case 'budget':     return <BudgetEmpty />;
       case 'categories': return <CategoriesEmpty />;
-      case 'accounts':   return <AccountsEmpty />;
+      case 'accounts':   return <AccountsTab />;
     }
   }
 
@@ -213,6 +197,8 @@ export default function TransactionsScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
 
@@ -259,9 +245,7 @@ const s = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: colors.surface,
   },
-  subTabActive: {
-    backgroundColor: colors.brandLight,
-  },
+  subTabActive: { backgroundColor: colors.brandLight },
   subTabText: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.medium,
@@ -304,57 +288,15 @@ const s = StyleSheet.create({
     marginBottom: spacing.lg,
   },
 
-  cardRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    width: '100%',
-    marginBottom: spacing.md,
-  },
-  sourceCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    ...shadows.sm,
-  },
-  sourceCardHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
-  sourceCardTitle: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.semibold,
-    color: colors.dark,
-  },
-  sourceCardDesc: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
-    lineHeight: 17,
-    marginBottom: spacing.md,
-  },
-
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: fontWeight.semibold,
-  },
-
   btnPrimary: {
     backgroundColor: colors.brand,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     alignItems: 'center',
   },
   btnPrimaryText: {
-    fontSize: fontSize.xs,
+    fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
     color: colors.white,
   },
@@ -362,54 +304,17 @@ const s = StyleSheet.create({
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.brand,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     alignItems: 'center',
   },
   btnGhostText: {
-    fontSize: fontSize.xs,
+    fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
     color: colors.brand,
   },
-
-  uploadCard: {
-    width: '100%',
-    backgroundColor: colors.white,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadows.sm,
-  },
-  uploadCardHead: { marginBottom: spacing.sm },
-  uploadCardSub: {
-    fontSize: fontSize.xs,
-    color: colors.muted,
-    marginTop: 2,
-  },
-  uploadTypes: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  uploadChip: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: spacing.xs,
-    alignItems: 'center',
-  },
-  uploadChipText: {
-    fontSize: 10,
-    fontWeight: fontWeight.semibold,
-    color: colors.mid,
-    textAlign: 'center',
-  },
-
-  manualLink: { marginTop: spacing.sm, paddingVertical: spacing.xs },
+  manualLink: { marginTop: spacing.md, paddingVertical: spacing.xs },
   manualLinkText: {
     fontSize: fontSize.sm,
     color: colors.brand,

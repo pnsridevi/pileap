@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["SmsReaderModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.smsreader.SmsReaderModule"]
+  }
+}

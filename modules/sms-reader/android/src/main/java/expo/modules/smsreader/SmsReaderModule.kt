@@ -14,6 +14,7 @@ class SmsReaderModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SmsReader")
 
+    // Returns filtered bank SMS from last 90 days
     AsyncFunction("getMessages") { promise: Promise ->
       val context = appContext.reactContext
         ?: return@AsyncFunction promise.reject(
@@ -21,92 +22,108 @@ class SmsReaderModule : Module() {
           )
 
       val granted = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.READ_SMS
+        context, Manifest.permission.READ_SMS
       ) == PackageManager.PERMISSION_GRANTED
 
       if (!granted) {
-        promise.reject(
-          CodedException("ERR_NO_PERMISSION", "READ_SMS permission not granted", null)
-        )
+        promise.reject(CodedException("ERR_NO_PERMISSION", "READ_SMS permission not granted", null))
         return@AsyncFunction
       }
 
       try {
         val messages = mutableListOf<Map<String, Any>>()
         val ninetyDaysAgo = System.currentTimeMillis() - (90L * 24 * 60 * 60 * 1000)
-
-        val uri = Uri.parse("content://sms/inbox")
-        val projection = arrayOf("_id", "address", "body", "date")
-        val selection = "date > ?"
-        val selectionArgs = arrayOf(ninetyDaysAgo.toString())
-        val sortOrder = "date DESC"
-
         val cursor: Cursor? = context.contentResolver.query(
-          uri, projection, selection, selectionArgs, sortOrder
+          Uri.parse("content://sms/inbox"),
+          arrayOf("_id", "address", "body", "date"),
+          "date > ?",
+          arrayOf(ninetyDaysAgo.toString()),
+          "date DESC"
         )
-
         cursor?.use {
           val idIndex   = it.getColumnIndexOrThrow("_id")
           val addrIndex = it.getColumnIndexOrThrow("address")
           val bodyIndex = it.getColumnIndexOrThrow("body")
           val dateIndex = it.getColumnIndexOrThrow("date")
-
           while (it.moveToNext()) {
             val address = it.getString(addrIndex) ?: continue
             val body    = it.getString(bodyIndex) ?: continue
-
             if (!isFinancialSms(body)) continue
-
-            messages.add(
-              mapOf(
-                "id"      to it.getString(idIndex),
-                "address" to address,
-                "body"    to body,
-                "date"    to it.getLong(dateIndex)
-              )
-            )
+            messages.add(mapOf(
+              "id"      to it.getString(idIndex),
+              "address" to address,
+              "body"    to body,
+              "date"    to it.getLong(dateIndex)
+            ))
           }
         }
-
         promise.resolve(messages)
       } catch (e: Exception) {
-        promise.reject(
-          CodedException("ERR_SMS_READ", e.message ?: "Failed to read SMS", e)
-        )
+        promise.reject(CodedException("ERR_SMS_READ", e.message ?: "Failed to read SMS", e))
       }
     }
 
+    // Debug: returns all unique senders + total count from raw inbox (last 90 days)
+    // Used to diagnose which senders are present but being filtered out
+    AsyncFunction("getAllSenders") { promise: Promise ->
+      val context = appContext.reactContext
+        ?: return@AsyncFunction promise.reject(
+            CodedException("ERR_NO_CONTEXT", "React context unavailable", null)
+          )
+
+      val granted = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_SMS
+      ) == PackageManager.PERMISSION_GRANTED
+
+      if (!granted) {
+        promise.reject(CodedException("ERR_NO_PERMISSION", "READ_SMS permission not granted", null))
+        return@AsyncFunction
+      }
+
+      try {
+        val senders = mutableSetOf<String>()
+        var totalCount = 0
+        val ninetyDaysAgo = System.currentTimeMillis() - (90L * 24 * 60 * 60 * 1000)
+        val cursor: Cursor? = context.contentResolver.query(
+          Uri.parse("content://sms/inbox"),
+          arrayOf("address", "date"),
+          "date > ?",
+          arrayOf(ninetyDaysAgo.toString()),
+          "date DESC"
+        )
+        cursor?.use {
+          val addrIndex = it.getColumnIndexOrThrow("address")
+          while (it.moveToNext()) {
+            totalCount++
+            val address = it.getString(addrIndex) ?: continue
+            senders.add(address)
+          }
+        }
+        promise.resolve(mapOf(
+          "totalCount" to totalCount,
+          "senders"    to senders.sorted()
+        ))
+      } catch (e: Exception) {
+        promise.reject(CodedException("ERR_SMS_READ", e.message ?: "Failed to read senders", e))
+      }
+    }
+
+    // Check if READ_SMS permission is granted
     AsyncFunction("hasPermission") { promise: Promise ->
       val context = appContext.reactContext
         ?: return@AsyncFunction promise.resolve(false)
-
       val granted = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.READ_SMS
+        context, Manifest.permission.READ_SMS
       ) == PackageManager.PERMISSION_GRANTED
-
       promise.resolve(granted)
     }
   }
 
   // ── Liberal financial SMS filter ──────────────────────────────────────────
-  // Philosophy: filter is a ROUGH NET — rejects only obvious non-financial SMS.
-  // Parser is the FINE MESH — discards anything that doesn't produce required
-  // fields (amount + direction + date). Nothing promotional ever reaches the
-  // transactions table because the parser can't extract a valid direction from it.
-  //
-  // Three rejection layers only:
-  //   1. OTP / verification messages
-  //   2. Delivery / logistics tracking
-  //   3. Pure service / account management alerts with no amount
-  //
-  // Everything else that has any financial signal passes through to the parser.
-
   private fun isFinancialSms(body: String): Boolean {
     val b = body.lowercase()
 
-    // ── Reject Layer 1: OTP and verification ─────────────────────────────────
+    // Layer 1: Reject OTP
     val isOtp =
       b.contains("otp") ||
       b.contains("one time password") ||
@@ -118,10 +135,9 @@ class SmsReaderModule : Module() {
       b.contains("login code") ||
       b.contains("sign in code") ||
       b.contains("authentication code")
-
     if (isOtp) return false
 
-    // ── Reject Layer 2: Delivery and logistics ────────────────────────────────
+    // Layer 2: Reject delivery/logistics
     val isDelivery =
       (b.contains("delivered") && !b.contains("rs.") && !b.contains("inr")) ||
       b.contains("out for delivery") ||
@@ -132,20 +148,17 @@ class SmsReaderModule : Module() {
       b.contains("tracking id") ||
       b.contains("dispatched") ||
       (b.contains("package") && !b.contains("rs.") && !b.contains("inr"))
-
     if (isDelivery) return false
 
-    // ── Reject Layer 3: Pure service alerts with no financial content ─────────
-    // Only reject if there is NO amount signal at all
+    // Layer 3: Reject pure service alerts with no amount
     val hasAmountSignal =
       b.contains("rs.") ||
       b.contains("rs ") ||
       b.contains("inr") ||
       b.contains("₹") ||
-      Regex("""\d+[\.,]\d{2}""").containsMatchIn(b) // e.g. 1,234.00 or 1234.00
+      Regex("""\d+[\.,]\d{2}""").containsMatchIn(b)
 
     if (!hasAmountSignal) {
-      // No amount at all — check if it's a pure service alert
       val isPureServiceAlert =
         b.contains("kyc") ||
         b.contains("your account is") ||
@@ -160,18 +173,10 @@ class SmsReaderModule : Module() {
         b.contains("thank you for banking") ||
         b.contains("welcome to") ||
         (b.contains("dear customer, your") && b.contains("updated"))
-
       if (isPureServiceAlert) return false
-
-      // No amount + not a clear service alert → still pass through
-      // Parser will discard it if no financial fields found
       return true
     }
 
-    // Has an amount signal → always pass through to parser
-    // This includes promotional SMS like the Kotak cashback example —
-    // the parser will discard them because it can't extract a valid
-    // debit/credit direction from promotional copy.
     return true
   }
 }

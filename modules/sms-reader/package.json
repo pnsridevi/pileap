@@ -1,0 +1,5 @@
+{
+  "name": "sms-reader",
+  "version": "1.0.0",
+  "main": "./plugin/index.js"
+}

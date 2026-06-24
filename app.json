@@ -22,11 +22,15 @@
         "backgroundColor": "#7C3AED"
       },
       "package": "com.pileap.app",
-      "permissions": []
+      "permissions": [
+        "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS"
+      ]
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./modules/sms-reader"
     ],
     "extra": {
       "router": {},

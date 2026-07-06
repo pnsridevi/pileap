@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-07-01T11:15:51.672Z",
+  "window": "90 → 180 days",
+  "summary": {
+    "total_for_haiku": 6
+  },
+  "messages": [
+    {
+      "id": "9214",
+      "address": "TM-MUFGIN-S",
+      "date": "2026-03-13",
+      "body": "3rd Interim Dividend of 50 paise per share for FY 2025-26 by Manappuram Finance Ltd has been credited into your bank account on 23.02.2026. Team MUFG Intime",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9191",
+      "address": "AD-CMWSSB-S",
+      "date": "2026-03-08",
+      "body": "Thank you for your payment of Rs. 960 for 0911603419000. Click the link to view or download the receipt https://bnc.chennaimetrowater.in/#/pr?id=voubc - CMWSSB.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9104",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-02-26",
+      "body": "Alert!\nPaid Rs. 4,241.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9066",
+      "address": "CP-ICICIL-S",
+      "date": "2026-02-21",
+      "body": "Your payment of Rs. 1887 was successful. We will share your policy documents within 24 hours on your registered contact details. T&C Apply ICICI Lombard",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "8895",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-01-29",
+      "body": "Alert!\nPaid Rs. 1,570.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "8893",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-01-29",
+      "body": "Alert!\nPaid Rs. 10,546.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    }
+  ]
+}

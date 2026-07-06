@@ -1,0 +1,5077 @@
+{
+  "generated_at": "2026-07-01T10:53:34.567Z",
+  "window": "0 → 90 days",
+  "summary": {
+    "total_input": 198,
+    "matched": 191,
+    "discarded": 0,
+    "not_matched": 7,
+    "rule_hits": {
+      "GENERIC_DEBIT": 125,
+      "GENERIC_CREDIT": 27,
+      "GENERIC_NACH": 39
+    }
+  },
+  "matched": [
+    {
+      "id": "9949",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-07-01",
+      "body": "Sent Rs.15000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 01/07/26\nRef 125573425341\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 15000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-07-01",
+          "ref_number": "125573425341",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9946",
+      "address": "VD-Pluxee-S",
+      "date": "2026-07-01",
+      "body": "Rs. 273.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 1-07-2026 9:16:12 at THENMANI ST CHENNAI. Avl bal Rs.8328.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 273,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-07-01",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9944",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-06-30",
+      "body": "Update! INR 211.00 deposited in HDFC Bank A/c XX4820 on 30-JUN-26 for Interest paid till 30-JUN-2026.Avl bal INR 34,080.12. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 211,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "4820",
+          "txn_date": "2026-06-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9943",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-06-30",
+      "body": "Update! INR 211.00 deposited in HDFC Bank A/c XX4820 on 30-JUN-26 for Interest paid till 30-JUN-2026.Avl bal INR 34,080.12. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 211,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "4820",
+          "txn_date": "2026-06-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9942",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-06-30",
+      "body": "Update! INR 15,524.00 deposited in HDFC Bank A/c XX2875 on 30-JUN-26 for Interest paid till 30-JUN-2026.Avl bal INR 30,83,780.59. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 15524,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9940",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-06-30",
+      "body": "HDFC Bank Cardmember, Payment of Rs 7084 was credited to your card ending 4636 on 29/JUN/2026.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 7084,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "your card ending 4636",
+          "account_number_masked": null,
+          "txn_date": "2026-06-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9934",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-30",
+      "body": "Sent Rs.520.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 30/06/26\nRef 125515256659\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 520,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-30",
+          "ref_number": "125515256659",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9930",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Update! INR 12,000.00 deposited in HDFC Bank A/c XX5713 on 30-JUN-26 for XXXXXXXXXX2875   NET BANKING SI -NBR7DUZZ3W6AJG53.Avl bal INR 1,46,771.96. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 12000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "5713",
+          "txn_date": "2026-06-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9928",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 29/06/26\nRef 125468640602\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-29",
+          "ref_number": "125468640602",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9927",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9925",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 7084.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 4636 ON 29-6-2026.YOUR AVAILABLE LIMIT IS RS. 199359.66",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 7084,
+          "bank": "HDFC Bank",
+          "channel": "Card",
+          "merchant": "YOUR CREDIT CARD ENDING WITH 4636 ON 29-6-2026",
+          "account_number_masked": null,
+          "txn_date": "2026-06-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9922",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Update! INR 7,57,089.00 deposited in HDFC Bank A/c XX2875 on 29-JUN-26 for NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C-BOFAH26180004433.Avl bal INR 31,40,277.47. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 757089,
+          "bank": "HDFC Bank",
+          "channel": "NEFT",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9920",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-28",
+      "body": "Your Pluxee Card has been successfully credited with Rs.4400 towards  Meal Wallet on Mon Jun 29 2026 05:19:20. Your current Meal Wallet balance is Rs.8601.72.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 4400,
+          "bank": null,
+          "channel": "Wallet",
+          "merchant": "Meal Wallet on Mon Jun 29 2026 05:19:20",
+          "account_number_masked": null,
+          "txn_date": "2026-06-28",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9913",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-28",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-28",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9909",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-26",
+      "body": "Rs. 355.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 26-06-2026 19:37:7 at THENMANI ST CHENNAI. Avl bal Rs.4201.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 355,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-26",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9904",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-25",
+      "body": "Sent Rs.300.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 25/06/26\nRef 654214003770\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 300,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-25",
+          "ref_number": "654214003770",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9902",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-25",
+      "body": "PAYMENT ALERT! \nINR 11000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 11000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9901",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-25",
+      "body": "PAYMENT ALERT! \nINR 3000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 3000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9900",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-25",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9893",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-24",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-24",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9890",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-06-23",
+      "body": "Sent Rs.3000.00\nFrom HDFC Bank A/C *2875\nTo SRIRAMAN  S\nOn 23/06/26\nRef 654024244607\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 3000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "SRIRAMAN  S",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-23",
+          "ref_number": "654024244607",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9888",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-06-23",
+      "body": "PAYMENT ALERT! \nINR 2500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-23",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9885",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-22",
+      "body": "Rs. 780.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 22-06-2026 21:21:19 at THENMANI ST CHENNAI. Avl bal Rs.4556.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 780,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-22",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9884",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-22",
+      "body": "Rs. 780.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 22-06-2026 21:21:19 at THENMANI ST CHENNAI. Avl bal Rs.4556.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 780,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-22",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9882",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-06-22",
+      "body": "Sent Rs.500.00\nFrom HDFC Bank A/C *2875\nTo KARTHICK PERUMAL\nOn 22/06/26\nRef 617390841919\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 500,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "KARTHICK PERUMAL",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-22",
+          "ref_number": "617390841919",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9880",
+      "address": "JD-HDFCBK-T",
+      "date": "2026-06-22",
+      "body": "Sent Rs.14000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 22/06/26\nRef 125126775119\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 14000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-22",
+          "ref_number": "125126775119",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9872",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-21",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-21",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9869",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-20",
+      "body": "PAYMENT ALERT! \nINR 1900.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1900,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-20",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9865",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-06-19",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 18-06-2026. Available offline balance is Rs831.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-19",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9863",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-06-19",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 19/06/26\nRef 124969549710\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-19",
+          "ref_number": "124969549710",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9861",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-06-19",
+      "body": "Sent Rs.300.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 19/06/26\nRef 653624511963\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 300,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-19",
+          "ref_number": "653624511963",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9856",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-18",
+      "body": "Sent Rs.173.00\nFrom HDFC Bank A/C *2875\nTo PL  SINGARAM\nOn 18/06/26\nRef 616967538589\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 173,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PL  SINGARAM",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-18",
+          "ref_number": "616967538589",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9852",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-06-17",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-17",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9846",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-15",
+      "body": "Sent Rs.500.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 15/06/26\nRef 616653559403\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 500,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-15",
+          "ref_number": "616653559403",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9845",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-15",
+      "body": "Sent Rs.25000.00\nFrom HDFC Bank A/C *2875\nTo Udavum Karangal\nOn 15/06/26\nRef 124775836487\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 25000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Udavum Karangal",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-15",
+          "ref_number": "124775836487",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9841",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-15",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 15/06/26\nRef 124758659595\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-15",
+          "ref_number": "124758659595",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9837",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-14",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-14",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9834",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-13",
+      "body": "Rs. 80.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 13-06-2026 14:49:55 at THENMANI ST CHENNAI. Avl bal Rs.5336.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 80,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-13",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9831",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-06-13",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 12-06-2026. Available offline balance is Rs959.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-13",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9828",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-12",
+      "body": "Rs. 4428.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 12-06-2026 18:16:9 at THENMANI ST CHENNAI. Avl bal Rs.5416.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 4428,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-12",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9827",
+      "address": "VD-HDFCBK-T",
+      "date": "2026-06-12",
+      "body": "Sent Rs.109.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 12/06/26\nRef 124624000723\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 109,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-12",
+          "ref_number": "124624000723",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9822",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-06-12",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 11-06-2026. Available offline balance is Rs1023.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-12",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9817",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-06-11",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs48.00 on 10-06-2026. Available offline balance is Rs87.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 48,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-11",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9815",
+      "address": "JM-HDFCBK-T",
+      "date": "2026-06-10",
+      "body": "Sent Rs.206.00\nFrom HDFC Bank A/C *2875\nTo VIJAYALAKSHMI P\nOn 10/06/26\nRef 652779512854\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 206,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "VIJAYALAKSHMI P",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-10",
+          "ref_number": "652779512854",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9813",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-06-10",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 09-06-2026. Available offline balance is Rs135.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-10",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9812",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-10",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 10/06/26\nRef 124494006772\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-10",
+          "ref_number": "124494006772",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9811",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-06-10",
+      "body": "Sent Rs.100.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 10/06/26\nRef 616176821408\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 100,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-10",
+          "ref_number": "616176821408",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9808",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-06-09",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 08-06-2026. Available offline balance is Rs199.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-09",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9807",
+      "address": "JM-HDFCBK-T",
+      "date": "2026-06-09",
+      "body": "Sent Rs.165.00\nFrom HDFC Bank A/C *2875\nTo Nirmalbarathi  Balraj\nOn 09/06/26\nRef 652610160260\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 165,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Nirmalbarathi  Balraj",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-09",
+          "ref_number": "652610160260",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9803",
+      "address": "AX-HDFCBK-T",
+      "date": "2026-06-08",
+      "body": "Sent Rs.200.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 08/06/26\nRef 615987183645\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 200,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-08",
+          "ref_number": "615987183645",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9801",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-06-08",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs32.00 on 04-06-2026. Available offline balance is Rs263.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 32,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-08",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9799",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-08",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 08/06/26\nRef 124388859150\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-08",
+          "ref_number": "124388859150",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9798",
+      "address": "JD-HDFCBK-T",
+      "date": "2026-06-08",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 08/06/26\nRef 124388806892\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-08",
+          "ref_number": "124388806892",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9794",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-06-07",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-07",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9792",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-06-07",
+      "body": "Sent Rs.490.00\nFrom HDFC Bank A/C *2875\nTo Mr HARISH  M\nOn 07/06/26\nRef 124328936890\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 490,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Mr HARISH  M",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-07",
+          "ref_number": "124328936890",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9791",
+      "address": "JM-Pluxee-S",
+      "date": "2026-06-06",
+      "body": "Rs. 130.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 6-06-2026 21:11:13 at THENMANI ST CHENNAI. Avl bal Rs.9844.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 130,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-06-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9787",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-06-05",
+      "body": "Sent Rs.220.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 05/06/26\nRef 615683116005\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 220,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-05",
+          "ref_number": "615683116005",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9786",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-06-05",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs32.00 on 04-06-2026. Available offline balance is Rs295.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 32,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-05",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9783",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-04",
+      "body": "Sent Rs.150.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 04/06/26\nRef 652155414664\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 150,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-04",
+          "ref_number": "652155414664",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9782",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-06-04",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 03-06-2026. Available offline balance is Rs327.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-04",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9777",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-06-03",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs56.00 on 02-06-2026. Available offline balance is Rs391.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 56,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-03",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9776",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-03",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 03/06/26\nRef 124123056250\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-03",
+          "ref_number": "124123056250",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9771",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-06-02",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs56.00 on 01-06-2026. Available offline balance is Rs447.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 56,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-06-02",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9770",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-02",
+      "body": "Credit Alert!\nRs.210.00 credited to HDFC Bank A/c XX5713 on 02-06-26 from VPA 7397508814-2@ybl (UPI 223335558739)\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 210,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "7397508814-2@ybl",
+          "account_number_masked": "5713",
+          "txn_date": "2026-06-02",
+          "ref_number": "223335558739",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": true
+        }
+      }
+    },
+    {
+      "id": "9768",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-02",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 02/06/26\nRef 124070738054\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-02",
+          "ref_number": "124070738054",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9764",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-06-01",
+      "body": "Credit Alert!\nRs.30.00 credited to HDFC Bank A/c XX5713 on 01-06-26 from VPA 9840356522@ybl (UPI 020929109476)\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 30,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "9840356522@ybl",
+          "account_number_masked": "5713",
+          "txn_date": "2026-06-01",
+          "ref_number": "020929109476",
+          "ref_type": "upi_rrn",
+          "confidence": 0.75,
+          "possible_contra": false,
+          "requires_classification": true
+        }
+      }
+    },
+    {
+      "id": "9763",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-06-01",
+      "body": "Sent Rs.194.00\nFrom HDFC Bank A/C *2875\nTo Nirmalbarathi  Balraj\nOn 01/06/26\nRef 124025232681\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 194,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Nirmalbarathi  Balraj",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-01",
+          "ref_number": "124025232681",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9762",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-06-01",
+      "body": "Sent Rs.16000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 01/06/26\nRef 124015103102\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 16000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-01",
+          "ref_number": "124015103102",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9761",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-06-01",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-06-01",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9755",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-30",
+      "body": "Sent Rs.1000.00\nFrom HDFC Bank A/C *2875\nTo PANNEERSELVAM  SOMU\nOn 30/05/26\nRef 123955681732\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PANNEERSELVAM  SOMU",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-30",
+          "ref_number": "123955681732",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9749",
+      "address": "CP-HDFCBK-S",
+      "date": "2026-05-29",
+      "body": "Update! INR 12,000.00 deposited in HDFC Bank A/c XX5713 on 30-MAY-26 for XXXXXXXXXX2875   NET BANKING SI -NBR7DUZZ3W6AJG53.Avl bal INR 1,63,190.14. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 12000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "5713",
+          "txn_date": "2026-05-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9744",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-05-28",
+      "body": "Sent Rs.450.00\nFrom HDFC Bank A/C *2875\nTo PANNEERSELVAM  SOMU\nOn 29/05/26\nRef 651526553913\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 450,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PANNEERSELVAM  SOMU",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-29",
+          "ref_number": "651526553913",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9740",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-05-28",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs79.00 on 27-05-2026. Available offline balance is Rs503.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 79,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-28",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9739",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-28",
+      "body": "Sent Rs.488.00\nFrom HDFC Bank A/C *2875\nTo Rajan Eye Care Hospital P\nOn 28/05/26\nRef 123823400599\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 488,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Rajan Eye Care Hospital P",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-28",
+          "ref_number": "123823400599",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9736",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-05-28",
+      "body": "Sent Rs.500.00\nFrom HDFC Bank A/C *2875\nTo Rajan Eye Care Hospital P\nOn 28/05/26\nRef 123819130284\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 500,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Rajan Eye Care Hospital P",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-28",
+          "ref_number": "123819130284",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9733",
+      "address": "JD-Pluxee-S",
+      "date": "2026-05-28",
+      "body": "Your Pluxee Card has been successfully credited with Rs.6300 towards  Meal Wallet on Thu May 28 2026 06:15:05. Your current Meal Wallet balance is Rs.9974.72.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 6300,
+          "bank": null,
+          "channel": "Wallet",
+          "merchant": "Meal Wallet on Thu May 28 2026 06:15:05",
+          "account_number_masked": null,
+          "txn_date": "2026-05-28",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9732",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-27",
+      "body": "Sent Rs.200.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 27/05/26\nRef 614755534052\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 200,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-27",
+          "ref_number": "614755534052",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9731",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-27",
+      "body": "Sent Rs.100.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 27/05/26\nRef 123790966067\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 100,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-27",
+          "ref_number": "123790966067",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9730",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-27",
+      "body": "Update! INR 2,40,492.00 deposited in HDFC Bank A/c XX2875 on 27-MAY-26 for NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C-BOFAH26147003229.Avl bal INR 25,87,932.98. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 240492,
+          "bank": "HDFC Bank",
+          "channel": "NEFT",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-27",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9726",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-26",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 26/05/26\nRef 123722510343\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-26",
+          "ref_number": "123722510343",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9725",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-26",
+      "body": "Sent Rs.15000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 26/05/26\nRef 123722331569\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 15000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-26",
+          "ref_number": "123722331569",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9724",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-05-26",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 25-05-2026. Available offline balance is Rs666.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-26",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9723",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-05-26",
+      "body": "Update! INR 5,452.00 deposited in HDFC Bank A/c XX2875 on 26-MAY-26 for ACH C- POWERGRID INFRASTRUC-2202365.Avl bal INR 23,67,701.25. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 5452,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-26",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9721",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-05-26",
+      "body": "Sent Rs.80.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 26/05/26\nRef 123706848037\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 80,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-26",
+          "ref_number": "123706848037",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9720",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-26",
+      "body": "PAYMENT ALERT! \nINR 2500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-26",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9718",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-25",
+      "body": "PAYMENT ALERT! \nINR 11000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 11000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9717",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-25",
+      "body": "PAYMENT ALERT! \nINR 3000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 3000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9716",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-25",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-25",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9712",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-24",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-24",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9711",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-05-23",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 22-05-2026. Available offline balance is Rs730.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-23",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9704",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-05-22",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 21-05-2026. Available offline balance is Rs794.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-22",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9700",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-05-22",
+      "body": "Credit Alert!\nRs.4700.00 credited to HDFC Bank A/c XX2875 on 22-05-26 from VPA suresh.sureshku@okicici (UPI 614258810791)\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 4700,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "suresh.sureshku@okicici",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-22",
+          "ref_number": "614258810791",
+          "ref_type": "upi_rrn",
+          "confidence": 0.75,
+          "possible_contra": false,
+          "requires_classification": true
+        }
+      }
+    },
+    {
+      "id": "9697",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-21",
+      "body": "Sent Rs.171.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 21/05/26\nRef 614189854337\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 171,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-21",
+          "ref_number": "614189854337",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9696",
+      "address": "JD-Pluxee-S",
+      "date": "2026-05-21",
+      "body": "Rs. 80.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 21-05-2026 18:58:57 at THENMANI ST CHENNAI. Avl bal Rs.3674.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 80,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-05-21",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9695",
+      "address": "JD-Pluxee-S",
+      "date": "2026-05-21",
+      "body": "Rs. 345.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 21-05-2026 13:37:53 at THENMANI ST CHENNAI. Avl bal Rs.3754.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 345,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-05-21",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9694",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-21",
+      "body": "Sent Rs.210.00\nFrom HDFC Bank A/C *2875\nTo PL  SINGARAM\nOn 21/05/26\nRef 614141027252\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 210,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PL  SINGARAM",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-21",
+          "ref_number": "614141027252",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9691",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-05-21",
+      "body": "PAYMENT ALERT! \nINR 1900.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1900,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-21",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9688",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-05-20",
+      "body": "Sent Rs.710.00\nFrom HDFC Bank A/C *2875\nTo NASIMA M\nOn 20/05/26\nRef 123410649256\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 710,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "NASIMA M",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-20",
+          "ref_number": "123410649256",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9672",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-18",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 18/05/26\nRef 123310775913\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-18",
+          "ref_number": "123310775913",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9671",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-18",
+      "body": "PAYMENT ALERT! \nINR 2500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-18",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9665",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-05-17",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-17",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9649",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-15",
+      "body": "HDFC Bank Cardmember, Payment of Rs 18751 was credited to your card ending 4636 on 14/MAY/2026.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 18751,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "your card ending 4636",
+          "account_number_masked": null,
+          "txn_date": "2026-05-15",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9623",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-14",
+      "body": "Sent Rs.576.00\nFrom HDFC Bank A/C *2875\nTo Mr Anbarasan G\nOn 14/05/26\nRef 650042352255\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 576,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Mr Anbarasan G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-14",
+          "ref_number": "650042352255",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9618",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-05-13",
+      "body": "Sent Rs.1198.00\nFrom HDFC Bank A/C *2875\nTo Airtel\nOn 14/05/26\nRef 123091460285\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1198,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Airtel",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-14",
+          "ref_number": "123091460285",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9616",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-13",
+      "body": "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 18751.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 4636 ON 14-5-2026.YOUR AVAILABLE LIMIT IS RS. 200000.00",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 18751,
+          "bank": "HDFC Bank",
+          "channel": "Card",
+          "merchant": "YOUR CREDIT CARD ENDING WITH 4636 ON 14-5-2026",
+          "account_number_masked": null,
+          "txn_date": "2026-05-13",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9608",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-05-13",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-13",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9599",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-05-12",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-12",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9598",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-12",
+      "body": "Sent Rs.140.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 12/05/26\nRef 649809795534\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 140,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-12",
+          "ref_number": "649809795534",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9596",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-05-12",
+      "body": "Sent Rs.200.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 12/05/26\nRef 649803992581\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 200,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-12",
+          "ref_number": "649803992581",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9593",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-11",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 11/05/26\nRef 122945496137\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-11",
+          "ref_number": "122945496137",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9592",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-11",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 11/05/26\nRef 122941477159\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-11",
+          "ref_number": "122941477159",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9578",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-08",
+      "body": "Sent Rs.530.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 08/05/26\nRef 122817526435\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 530,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-08",
+          "ref_number": "122817526435",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9572",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-07",
+      "body": "Sent Rs.200.00\nFrom HDFC Bank A/C *2875\nTo Mr NARASHIMAN CHAKRAVARTH\nOn 08/05/26\nRef 122775041374\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 200,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Mr NARASHIMAN CHAKRAVARTH",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-08",
+          "ref_number": "122775041374",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9571",
+      "address": "JX-HDFCBK-T",
+      "date": "2026-05-07",
+      "body": "Sent Rs.140.00\nFrom HDFC Bank A/C *2875\nTo KARTHICK  VARADARAJAN\nOn 08/05/26\nRef 612805031681\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 140,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "KARTHICK  VARADARAJAN",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-08",
+          "ref_number": "612805031681",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9568",
+      "address": "AX-Pluxee-S",
+      "date": "2026-05-07",
+      "body": "Rs. 194.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 7-05-2026 20:57:34 at THENMANI ST CHENNAI. Avl bal Rs.4099.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 194,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-05-07",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9565",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-06",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 06/05/26\nRef 122692955847\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-06",
+          "ref_number": "122692955847",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9564",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-05-06",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs56.00 on 05-05-2026. Available offline balance is Rs858.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 56,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9563",
+      "address": "JD-HDFCBK-T",
+      "date": "2026-05-06",
+      "body": "Sent Rs.300.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 06/05/26\nRef 122684655448\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 300,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-06",
+          "ref_number": "122684655448",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9562",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-05-06",
+      "body": "PAYMENT ALERT! \nINR 1700.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1700,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-06",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9561",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-05-06",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-06",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9560",
+      "address": "JD-Pluxee-S",
+      "date": "2026-05-06",
+      "body": "Rs. 636.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 6-05-2026 10:29:56 at THENMANI ST CHENNAI. Avl bal Rs.4293.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 636,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-05-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9557",
+      "address": "CP-HDFCBK-T",
+      "date": "2026-05-05",
+      "body": "Sent Rs.50000.00\nFrom HDFC Bank A/C *2875\nTo SRIDEVI P N\nOn 05/05/26\nRef 122657594115\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "SRIDEVI P N",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-05",
+          "ref_number": "122657594115",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9555",
+      "address": "JD-SBIBNK-T",
+      "date": "2026-05-05",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 04-05-2026. Available offline balance is Rs914.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-05",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9553",
+      "address": "AX-HDFCBK-T",
+      "date": "2026-05-05",
+      "body": "Sent Rs.10000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 05/05/26\nRef 122624318001\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 10000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-05",
+          "ref_number": "122624318001",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9545",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-05-03",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-03",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9544",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-05-02",
+      "body": "Sent Rs.500.00\nFrom HDFC Bank A/C *2875\nTo V VIJAYARAGHAVAN\nOn 03/05/26\nRef 648909880487\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 500,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "V VIJAYARAGHAVAN",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-03",
+          "ref_number": "648909880487",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9539",
+      "address": "JX-HDFCBK-T",
+      "date": "2026-05-01",
+      "body": "Sent Rs.300.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 01/05/26\nRef 612175030064\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 300,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-05-01",
+          "ref_number": "612175030064",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9538",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-05-01",
+      "body": "HDFC Bank Cardmember, Payment of Rs 5731 was credited to your card ending 4636 on 30/APR/2026.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 5731,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "your card ending 4636",
+          "account_number_masked": null,
+          "txn_date": "2026-05-01",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9537",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-05-01",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs56.00 on 30-04-2026. Available offline balance is Rs978.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 56,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-05-01",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9534",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-30",
+      "body": "Sent Rs.171.00\nFrom HDFC Bank A/C *2875\nTo RAGHUL  G\nOn 30/04/26\nRef 648683953406\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 171,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "RAGHUL  G",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-30",
+          "ref_number": "648683953406",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9532",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-04-30",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 29-04-2026. Available offline balance is Rs1034.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9531",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-30",
+      "body": "Sent Rs.200.00\nFrom HDFC Bank A/C *2875\nTo VIJAY BALA\nOn 30/04/26\nRef 122371587424\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 200,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "VIJAY BALA",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-30",
+          "ref_number": "122371587424",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9529",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-04-30",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9527",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-30",
+      "body": "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 5731.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 4636 ON 30-4-2026.YOUR AVAILABLE LIMIT IS RS. 195707.00",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 5731,
+          "bank": "HDFC Bank",
+          "channel": "Card",
+          "merchant": "YOUR CREDIT CARD ENDING WITH 4636 ON 30-4-2026",
+          "account_number_masked": null,
+          "txn_date": "2026-04-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9523",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-29",
+      "body": "Update! INR 12,000.00 deposited in HDFC Bank A/c XX5713 on 30-APR-26 for XXXXXXXXXX2875   NET BANKING SI -NBR7DUZZ3W6AJG53.Avl bal INR 1,51,190.14. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 12000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "5713",
+          "txn_date": "2026-04-30",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9522",
+      "address": "VD-Pluxee-S",
+      "date": "2026-04-29",
+      "body": "Rs. 580.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 29-04-2026 19:04:48 at THENMANI ST CHENNAI. Avl bal Rs.4929.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 580,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-04-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9518",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-04-29",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 28-04-2026. Available offline balance is Rs130.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9517",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-29",
+      "body": "Sent Rs.10000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 29/04/26\nRef 122318662619\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 10000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-29",
+          "ref_number": "122318662619",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9516",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-29",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-29",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9514",
+      "address": "VD-Pluxee-S",
+      "date": "2026-04-29",
+      "body": "Your Pluxee Card has been successfully credited with Rs.2500 towards  Meal Wallet on Wed Apr 29 2026 08:21:44. Your current Meal Wallet balance is Rs.5509.72.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 2500,
+          "bank": null,
+          "channel": "Wallet",
+          "merchant": "Meal Wallet on Wed Apr 29 2026 08:21:44",
+          "account_number_masked": null,
+          "txn_date": "2026-04-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9513",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-29",
+      "body": "Update! INR 2,43,645.00 deposited in HDFC Bank A/c XX2875 on 29-APR-26 for NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C-BOFAH26119006089.Avl bal INR 26,74,126.73. Cheque deposits in A/C are subject to clearing",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 243645,
+          "bank": "HDFC Bank",
+          "channel": "NEFT",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-29",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9511",
+      "address": "AD-SBIBNK-T",
+      "date": "2026-04-28",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 27-04-2026. Available offline balance is Rs194.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-28",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9508",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-27",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-27",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9503",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-26",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-26",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9500",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-04-25",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 24-04-2026. Available offline balance is Rs258.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-25",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9499",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-25",
+      "body": "Sent Rs.280.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 25/04/26\nRef 122117328383\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 280,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-25",
+          "ref_number": "122117328383",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9497",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-24",
+      "body": "PAYMENT ALERT! \nINR 3000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 3000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-24",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9496",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-24",
+      "body": "PAYMENT ALERT! \nINR 11000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 11000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-24",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9495",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-24",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-24",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9494",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-24",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards ZERODHA BROKING LTD UMRN: HDFC7011812231001380",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "ZERODHA BROKING LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-24",
+          "ref_number": "HDFC7011812231001380",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9488",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-23",
+      "body": "Sent Rs.120.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 23/04/26\nRef 122051273170\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 120,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-23",
+          "ref_number": "122051273170",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9486",
+      "address": "VD-HDFCBK-S",
+      "date": "2026-04-23",
+      "body": "Credit Alert!\nRs.100.00 credited to HDFC Bank A/c XX2875 on 23-04-26 from VPA sathyamfm31-1@okicici (UPI 647980110756)\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 100,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "sathyamfm31-1@okicici",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-23",
+          "ref_number": "647980110756",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": true
+        }
+      }
+    },
+    {
+      "id": "9483",
+      "address": "VM-Pluxee-S",
+      "date": "2026-04-22",
+      "body": "Rs. 1412.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 22-04-2026 13:27:18 at THENMANI ST CHENNAI. Avl bal Rs.3009.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1412,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-04-22",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9482",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-22",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-22",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9477",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-04-21",
+      "body": "Sent Rs.20000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 21/04/26\nRef 121932293061\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 20000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-21",
+          "ref_number": "121932293061",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9476",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-21",
+      "body": "PAYMENT ALERT! \nINR 1700.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1700,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-21",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9475",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-21",
+      "body": "Sent Rs.620.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 21/04/26\nRef 121923047891\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 620,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-21",
+          "ref_number": "121923047891",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9470",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-04-20",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-20",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9469",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-04-20",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs74.00 on 19-04-2026. Available offline balance is Rs322.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 74,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-20",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9468",
+      "address": "VD-HDFCBK-T",
+      "date": "2026-04-20",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 20/04/26\nRef 121878346595\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-20",
+          "ref_number": "121878346595",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9464",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-19",
+      "body": "Sent Rs.34.00\nFrom HDFC Bank A/C *2875\nTo VAIBHAV BIPINCHANDRA MAHE\nOn 19/04/26\nRef 610997415548\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 34,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "VAIBHAV BIPINCHANDRA MAHE",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-19",
+          "ref_number": "610997415548",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9463",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-19",
+      "body": "Sent Rs.380.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 19/04/26\nRef 647541190983\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 380,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-19",
+          "ref_number": "647541190983",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9462",
+      "address": "AX-HDFCBK-S",
+      "date": "2026-04-19",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-19",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9453",
+      "address": "VM-Pluxee-S",
+      "date": "2026-04-16",
+      "body": "Rs. 320.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 16-04-2026 19:39:50 at THENMANI ST CHENNAI. Avl bal Rs.4421.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 320,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-04-16",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9452",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-16",
+      "body": "Sent Rs.150.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 16/04/26\nRef 121682576934\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 150,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-16",
+          "ref_number": "121682576934",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9446",
+      "address": "JD-SBIBNK-T",
+      "date": "2026-04-14",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 13-04-2026. Available offline balance is Rs396.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-14",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9443",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-13",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-13",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9441",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-13",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 13/04/26\nRef 121519320204\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-13",
+          "ref_number": "121519320204",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9439",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-04-12",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-12",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9438",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-04-11",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 10-04-2026. Available offline balance is Rs460.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-11",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9431",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-10",
+      "body": "Withdrawn Rs.15000 From HDFC Bank Card x2898 At +TRIPLICANE On 2026-04-10:18:48:13 Bal Rs.2495967.12 Not You? Call 18002586161/SMS BLOCK DC  2898 to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 15000,
+          "bank": "HDFC Bank",
+          "channel": "ATM",
+          "merchant": "+TRIPLICANE",
+          "account_number_masked": "2898",
+          "txn_date": "2026-04-10",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9428",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-10",
+      "body": "Sent Rs.5000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 10/04/26\nRef 121375622663\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 5000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-10",
+          "ref_number": "121375622663",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9425",
+      "address": "JX-SBIBNK-T",
+      "date": "2026-04-10",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 09-04-2026. Available offline balance is Rs524.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-10",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9420",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-09",
+      "body": "Sent Rs.110.00\nFrom HDFC Bank A/C *2875\nTo Mr. RAGHUL\nOn 09/04/26\nRef 121338041960\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 110,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "Mr. RAGHUL",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-09",
+          "ref_number": "121338041960",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9417",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-04-09",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 08-04-2026. Available offline balance is Rs588.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-09",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9412",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-04-08",
+      "body": "PAYMENT ALERT! \nINR 2000.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 2000,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-08",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9410",
+      "address": "AX-SBIBNK-T",
+      "date": "2026-04-08",
+      "body": "Dear Customer, Total amt debited from offline wallet of Prepaid card ending 6295 is Rs64.00 on 07-04-2026. Available offline balance is Rs652.00 -SBI",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 64,
+          "bank": "State Bank of India",
+          "channel": "Wallet",
+          "merchant": null,
+          "account_number_masked": null,
+          "txn_date": "2026-04-08",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9409",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-08",
+      "body": "Sent Rs.180.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 08/04/26\nRef 646497271282\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 180,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-08",
+          "ref_number": "646497271282",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9407",
+      "address": "JM-Pluxee-S",
+      "date": "2026-04-07",
+      "body": "Rs. 173.00 spent from Pluxee  Meal Card wallet, card no.xx9258 on 7-04-2026 20:45:18 at THENMANI ST CHENNAI. Avl bal Rs.4741.72. Not you call 18002106919",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 173,
+          "bank": null,
+          "channel": "Card",
+          "merchant": null,
+          "account_number_masked": "9258",
+          "txn_date": "2026-04-07",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9406",
+      "address": "JD-HDFCBK-S",
+      "date": "2026-04-07",
+      "body": "HDFC Bank Cardmember, Payment of Rs 12030 was credited to your card ending 4636 on 06/APR/2026.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 12030,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "your card ending 4636",
+          "account_number_masked": null,
+          "txn_date": "2026-04-07",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9405",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-04-07",
+      "body": "HDFC Bank Cardmember, Payment of Rs 2521 was credited to your card ending 7231 on 06/APR/2026.",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 2521,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "your card ending 7231",
+          "account_number_masked": null,
+          "txn_date": "2026-04-07",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9401",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Sent Rs.6000.00\nFrom HDFC Bank A/C *2875\nTo ZERODHA BROKING LIMITED\nOn 06/04/26\nRef 121157061165\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 6000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "ZERODHA BROKING LIMITED",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-06",
+          "ref_number": "121157061165",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": true,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9400",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9398",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 2521.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 7231 ON 6-4-2026.YOUR AVAILABLE LIMIT IS RS. 199999.87",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 2521,
+          "bank": "HDFC Bank",
+          "channel": "Card",
+          "merchant": "YOUR CREDIT CARD ENDING WITH 7231 ON 6-4-2026",
+          "account_number_masked": null,
+          "txn_date": "2026-04-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9397",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 12030.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 4636 ON 6-4-2026.YOUR AVAILABLE LIMIT IS RS. 199767.16",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_CREDIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "credit",
+          "amount": 12030,
+          "bank": "HDFC Bank",
+          "channel": "Card",
+          "merchant": "YOUR CREDIT CARD ENDING WITH 4636 ON 6-4-2026",
+          "account_number_masked": null,
+          "txn_date": "2026-04-06",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9390",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-05",
+      "body": "PAYMENT ALERT! \nINR 1500.00 deducted from HDFC Bank A/C No 2875 towards INDIAN CLEARING CORP LTD UMRN: HDFC7012012234013082",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_NACH",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "NACH",
+          "merchant": "INDIAN CLEARING CORP LTD",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-05",
+          "ref_number": "HDFC7012012234013082",
+          "ref_type": "neft_utr",
+          "confidence": 0.85,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9388",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-04-04",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-04",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9386",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-04",
+      "body": "Sent Rs.450.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 04/04/26\nRef 121043302680\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 450,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-04",
+          "ref_number": "121043302680",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9385",
+      "address": "AD-HDFCBK-T",
+      "date": "2026-04-04",
+      "body": "Sent Rs.300.00\nFrom HDFC Bank A/C *2875\nTo PRADAP  R\nOn 04/04/26\nRef 646019591747\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 300,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "PRADAP  R",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-04",
+          "ref_number": "646019591747",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9382",
+      "address": "AD-HDFCBK-S",
+      "date": "2026-04-03",
+      "body": "Amt Deducted!\nRs.50,000.00 from your HDFC Bank A/c XX2875 for Money Transfer via HDFC Bank Online Banking.\nNot you?Call 18002586161/SMS BLOCK OB to 7308080808",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 50000,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": null,
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-03",
+          "ref_number": null,
+          "ref_type": null,
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    },
+    {
+      "id": "9376",
+      "address": "VM-HDFCBK-T",
+      "date": "2026-04-02",
+      "body": "Sent Rs.1500.00\nFrom HDFC Bank A/C *2875\nTo VASUDEVAN S\nOn 02/04/26\nRef 609214592633\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
+      "layer2": {
+        "matched": true,
+        "rule": "GENERIC_DEBIT",
+        "discard": false,
+        "reason": null,
+        "result": {
+          "direction": "debit",
+          "amount": 1500,
+          "bank": "HDFC Bank",
+          "channel": "UPI",
+          "merchant": "VASUDEVAN S",
+          "account_number_masked": "2875",
+          "txn_date": "2026-04-02",
+          "ref_number": "609214592633",
+          "ref_type": "upi_rrn",
+          "confidence": 0.8,
+          "possible_contra": false,
+          "requires_classification": false
+        }
+      }
+    }
+  ],
+  "discarded": [],
+  "not_matched": [
+    {
+      "id": "9924",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Alert!\nPaid Rs. 7,084.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9802",
+      "address": "AD-QCAMZN-S",
+      "date": "2026-06-08",
+      "body": "Payment of Rs 649.00 using Apay balance is successful at A.in. Updated balance is Rs 1.00. If not u? call 18001200163 - SMS via Pine Labs",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9612",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-05-13",
+      "body": "Alert!\nPaid Rs. 18,751.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9526",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-04-30",
+      "body": "Alert!\nPaid Rs. 5,731.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9515",
+      "address": "VA-QCAMZN-S",
+      "date": "2026-04-29",
+      "body": "Payment of Rs 574.00 using Apay balance is successful at A.in. Updated balance is Rs 0.00. If not u? call 18001200163 - SMS via Pine Labs",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9396",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Alert!\nPaid Rs. 2,521.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    },
+    {
+      "id": "9394",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Alert!\nPaid Rs. 12,030.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "layer2": {
+        "matched": false,
+        "rule": null,
+        "discard": false,
+        "reason": "no_rule_matched",
+        "result": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-07-01T10:53:34.570Z",
+  "window": "0 → 90 days",
+  "summary": {
+    "total_for_haiku": 7
+  },
+  "messages": [
+    {
+      "id": "9924",
+      "address": "JM-HDFCBK-S",
+      "date": "2026-06-29",
+      "body": "Alert!\nPaid Rs. 7,084.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9802",
+      "address": "AD-QCAMZN-S",
+      "date": "2026-06-08",
+      "body": "Payment of Rs 649.00 using Apay balance is successful at A.in. Updated balance is Rs 1.00. If not u? call 18001200163 - SMS via Pine Labs",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9612",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-05-13",
+      "body": "Alert!\nPaid Rs. 18,751.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9526",
+      "address": "JX-HDFCBK-S",
+      "date": "2026-04-30",
+      "body": "Alert!\nPaid Rs. 5,731.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9515",
+      "address": "VA-QCAMZN-S",
+      "date": "2026-04-29",
+      "body": "Payment of Rs 574.00 using Apay balance is successful at A.in. Updated balance is Rs 0.00. If not u? call 18001200163 - SMS via Pine Labs",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9396",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Alert!\nPaid Rs. 2,521.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "9394",
+      "address": "VM-HDFCBK-S",
+      "date": "2026-04-06",
+      "body": "Alert!\nPaid Rs. 12,030.00\nFor: Credit Card payment\nFrom HDFC Bank A/c XX2875\nVia Online Banking.",
+      "reason": "no_layer2_rule"
+    }
+  ]
+}

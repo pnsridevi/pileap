@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-07-03T13:01:41.591Z",
+  "window": "terminal_test_2250",
+  "summary": {
+    "total_for_haiku": 2
+  },
+  "messages": [
+    {
+      "id": "1087",
+      "address": "AX-ICICIB",
+      "date": 1780294117612,
+      "body": "AX-ICICIB: Fee payment of Rs.58,936.84 to Delhi Public School successful from A/c XX0359 on -HD",
+      "reason": "no_layer2_rule"
+    },
+    {
+      "id": "1110",
+      "address": "VM-HDFCBK",
+      "date": 1779720539834,
+      "body": "AD-HDFCBK: NEW BENEFICIARY A/C XX2234 HAS BEEN ADDED SUCCESSFULLY TO YOUR A/C XX5758 FOR FUND TRANSFER ON 12JAN26:04:45 IF NOT DONE BY YOU CALL BANK IMMEDIATELY -ICICI BANK DEMAND DRAFT NO 15531484 FOR RS14732696 HAS BEEN ENCASHED ON 06-02-2026 -YES BANK",
+      "reason": "no_layer2_rule"
+    }
+  ]
+}

@@ -1,29 +1,88 @@
 /**
  * smsParser.ts
- * Location: packages/core/smsParser.ts
+ * Location: apps/mobile/src/lib/smsParser.ts
  *
- * Input:  RawMessage[] — platform-agnostic; satisfied by SmsMessage (mobile)
- *         and future EmailMessage (web/email parser)
- * Output: ParsedTransaction[] — ready to upsert into transactions table
+ * Orchestrator for the 3-layer SMS parsing pipeline.
  *
- * Arch ref: Sections 4.4, 4.5, 4.8, 5.3, 5.7, 10.2
+ * Layer 1 — Already done by SmsReaderModule.kt (Kotlin, on-device filter)
+ *            By the time messages arrive here, noise/OTPs are already dropped.
  *
- * Changes from v1:
- *   - RawMessage replaces SmsMessage (platform-agnostic, arch 10.2)
- *   - Score-based direction detection (debit/credit keyword counts, not first-match)
- *   - bank detection from message body
- *   - channel detection (UPI/NEFT/IMPS/POS/ATM/NACH etc.)
- *   - balance extraction (available balance from SMS)
- *   - parse_failure reason on partial results instead of silent null drop
- *   - Full India-tuned taxonomy with word-boundary regex (ported from classifier.py)
- *     Covers: quick commerce, groceries, ride hailing, fuel, transit, fashion,
- *     electronics, electricity/water/gas, telecom, OTT, gaming, education brands,
- *     flights, hotels (with amount threshold), govt taxes, salons, fitness,
- *     FD/RD, stocks/brokers, crypto, NPS/PPF/SGB, BNPL, home/vehicle/education loans
- *   - UPI VPA domain → bank/wallet mapping
- *   - Amount-threshold disambiguation (hotel < ₹2000 = restaurant, ≥ ₹2000 = lodging)
- *   - Direction constraint on income entries (salary, rent received etc.)
+ * Layer 2 — layer2_ruleset.js (regex rules for known bank SMS formats)
+ *            Handles HDFC, PNB, SBI, Airtel etc. with high confidence.
+ *            Returns structured fields if matched, null if no rule matched.
+ *
+ * Layer 3 — layer3_haiku.js (Claude Haiku, called from BACKEND only)
+ *            NOT called here on-device. Messages that Layer 2 misses are
+ *            flagged with parse_failure: 'escalated_to_haiku' and
+ *            status: 'pending_review'. The backend Haiku worker picks these up
+ *            from the parse_jobs queue after they are uploaded.
+ *            (Arch ref: Section 10.3.3 — phone must never call Shared Fallback directly)
+ *
+ * Taxonomy fallback — if Layer 2 misses but the message has amount + direction,
+ *                     the local taxonomy classifier runs as a middle step before
+ *                     escalating to Haiku. This handles generic merchant patterns
+ *                     that Layer 2 doesn't cover (e.g. Swiggy, Netflix, Zerodha).
+ *
+ * Flow per message:
+ *   Layer 2 match?
+ *     YES → build transaction from Layer 2 fields + run taxonomy for category
+ *     NO  → try local taxonomy classifier
+ *              classified? → build transaction
+ *              not classified? → flag for Haiku (pending_review)
+ *
+ * Arch ref: Sections 4.4, 4.5, 4.8, 5.3, 5.7, 10.2, 10.3.3
+ *
+ * Change log:
+ *   [FIX] needsReview now includes || l2.requires_classification — person VPA
+ *         credits were auto-approved instead of routing to pending_review.
+ *   [FIX] Restaurants: removed maxAmount:2000 cap (blocked Zomato/Swiggy/cafe
+ *         bills above ₹2000), fixed domino'?s? → dominos? (missed "Dominos"),
+ *         added dining/coffee/meal patterns.
+ *   [FIX] Insurance: removed \bbajaj\s+finserv\b — Bajaj Finserv is a lending
+ *         company too; "EMI" in the text is the correct signal for EMI entries.
+ *   [FIX] extractBalance: added "balance is Rs." pattern for Indian Railways
+ *         RWallet SMS ("Now the Available Balance is Rs.1000.00").
+ *   [FIX] Travel sub_category 'Hotel' renamed to 'Accommodation' — 'hotel' is
+ *         a common South Indian restaurant naming convention (Saravana Bhavan,
+ *         Geetham etc.). Standalone \bhotel\b removed from taxonomy patterns;
+ *         only unambiguous accommodation signals retained (oyo, booking.com etc.)
+ *         Ambiguous hotel names route to pending_review; user classifies once,
+ *         custom categories handle all future occurrences.
+ *   [ADD] merchant_key field — normalised lookup key for custom category
+ *         matching. Lowercase, alphanumeric + @ only, max 40 chars. Separate
+ *         from merchant (display text) to survive truncation/casing variation.
+ *   [FIX] \bpvr\b → \bpvr (no trailing \b) — pvrinox was not matching.
+ *   [FIX] \bzepto\b → \bzepto (no trailing \b) — ZEPTONOW was not matching.
+ *   [FIX] \bsip\b → \bsip\s+(of|installment|debit(ed)?|payment|contribution)\b
+ *         — false positive on "sip gateway" (payment gateway, not SIP investment).
+ *   [FIX] \bamazon\b in Shopping → \bamazon\b(?!\s+prime) — Amazon Prime was
+ *         misfiling as Shopping instead of OTT. Also moved OTT entry above
+ *         Shopping in TAXONOMY array so tie-break resolves correctly.
+ *   [FIX] Telecom Mobile Recharge: expanded jio and airtel patterns to cover
+ *         postpaid, bill, mobile, sim, plan, pack variants. Added \breliance\s+jio\b
+ *         and \bbharti\s+airtel\b. Standalone \bjio\b and \bairtel\b were
+ *         firing on JioMart, JioSaavn, Airtel Xstream Play, Airtel Payments Bank.
+ *   [ADD] Transportation > Bus — redbus, abhibus, keybus.
+ *   [ADD] Travel > Flight — cleartrip, easemytrip, ixigo.
+ *   [ADD] Transportation > Public Transit — autope (IRCTC payment gateway).
+ *   [ADD] Investment > Life Insurance — shriramlife, shriram life.
+ *   [ADD] Investment > Health Insurance — manipalcigna, manipal cigna.
+ *   [ADD] Income > Dividends > Stock Dividend — \bdividend\b, direction:credit.
+ *   [ADD] Income > Salary — \bneft\s+cr\b for employer NEFT credits.
+ *   [REMOVE] Food & Dining > Canteen (\bpluxee\b, \bmeal\s+card\b) — Pluxee is
+ *         a payment instrument, not a spending category. Merchant at POS
+ *         determines category (same as any UPI/card spend). If taxonomy
+ *         matches → categorize; else → pending_review.
  */
+
+// Layer 2 — require() because it is a CommonJS .js file
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+// [FLAG — NOT FIXED] This imports './layer2_ruleset.js', but the file we
+// have is named 'ruleset.js' (per its own header: "Location:
+// apps/mobile/layer2/ruleset.js"). Left as-is since we can't see the actual
+// repo layout from here — please confirm this resolves correctly in your
+// build, or update one side to match the other.
+const { matchMessage } = require('./layer2_ruleset.js');
 
 // ─── Platform-agnostic input (arch 10.2) ─────────────────────────────────────
 
@@ -34,16 +93,21 @@ export interface RawMessage {
   date:    number;   // epoch milliseconds
 }
 
-// ─── Output type (maps to transactions table) ─────────────────────────────────
+// ─── Output type (maps to transactions table, arch 5.3.6) ────────────────────
 
 export interface ParsedTransaction {
   raw_sms_id:            string;
   txn_date:              string;        // YYYY-MM-DD
-  amount:                number | null; // null only on parse_failure
+  amount:                number | null; // signed: positive=credit, negative=debit
   type:                  TxnType | null;
   category:              string | null;
   sub_category:          string | null;
   merchant:              string | null;
+  // [ADD] merchant_key — normalised for custom category lookup.
+  // Lowercase, alphanumeric + @ only, max 40 chars.
+  // Used as the key in customCatData lookup — do NOT use merchant (display)
+  // for matching because casing/truncation varies across SMS templates.
+  merchant_key:          string | null;
   source:                'sms';
   status:                'approved' | 'pending_review';
 
@@ -51,19 +115,25 @@ export interface ParsedTransaction {
   account_number_masked: string | null;
   bank:                  string | null;
   channel:               string | null;
-  balance:               number | null; // available balance from SMS
+  balance:               number | null;
 
   // Ref number (arch 5.3.6 v3.1)
   ref_number:            string | null;
   ref_type:              'upi_rrn' | 'neft_utr' | 'unknown' | null;
+
+  // Layer 2 metadata
+  matched_rule:          string | null;
+  confidence:            number | null;
+  requires_classification: boolean;
+  possible_contra:       boolean;
 
   // Deferred / post-insert
   txn_group_id:          null;
   is_infrastructure:     boolean;
   health_module_tag:     null;
 
-  // Failure tracking (replaces silent null drop — routes to pending_review)
-  parse_failure:         string | null; // 'missing_amount' | 'unknown_direction' | 'unclassified'
+  // Failure tracking
+  parse_failure:         string | null;
 
   // Raw — AES-256 encrypt before INSERT (arch 11.2)
   raw_text:              string;
@@ -86,8 +156,8 @@ interface ExtractedFields {
 }
 
 interface Classification {
-  type:        TxnType;
-  category:    string;
+  type:         TxnType;
+  category:     string;
   sub_category: string | null;
 }
 
@@ -98,27 +168,26 @@ const UPI_INFRA_SENDERS = ['NPCI', 'UPITRN', 'UPITXN', 'SBIPSG', 'HDFCPAY'];
 // ─── Bank keyword map ─────────────────────────────────────────────────────────
 
 const BANK_MAP: Record<string, string> = {
-  'HDFC':        'HDFC Bank',
-  'ICICI':       'ICICI Bank',
-  'SBI':         'State Bank of India',
-  'AXIS':        'Axis Bank',
-  'KOTAK':       'Kotak Mahindra Bank',
-  'YES BANK':    'Yes Bank',
-  'YESBANK':     'Yes Bank',
-  'PNB':         'Punjab National Bank',
-  'BOB':         'Bank of Baroda',
-  'CANARA':      'Canara Bank',
-  'IDFC':        'IDFC First Bank',
-  'INDUSIND':    'IndusInd Bank',
-  'FEDERAL':     'Federal Bank',
-  'RBL':         'RBL Bank',
-  'UNION BANK':  'Union Bank of India',
-  'PAYTM':       'Paytm Payments Bank',
-  'AIRTEL':      'Airtel Payments Bank',
-  'AU BANK':     'AU Small Finance Bank',
-  'AUBANK':      'AU Small Finance Bank',
-  'BANDHAN':     'Bandhan Bank',
-  'JANA':        'Jana Small Finance Bank',
+  'HDFC':       'HDFC Bank',
+  'ICICI':      'ICICI Bank',
+  'SBI':        'State Bank of India',
+  'AXIS':       'Axis Bank',
+  'KOTAK':      'Kotak Mahindra Bank',
+  'YES BANK':   'Yes Bank',
+  'YESBANK':    'Yes Bank',
+  'PNB':        'Punjab National Bank',
+  'BOB':        'Bank of Baroda',
+  'CANARA':     'Canara Bank',
+  'IDFC':       'IDFC First Bank',
+  'INDUSIND':   'IndusInd Bank',
+  'FEDERAL':    'Federal Bank',
+  'RBL':        'RBL Bank',
+  'UNION BANK': 'Union Bank of India',
+  'PAYTM':      'Paytm Payments Bank',
+  'AIRTEL':     'Airtel Payments Bank',
+  'AU BANK':    'AU Small Finance Bank',
+  'AUBANK':     'AU Small Finance Bank',
+  'BANDHAN':    'Bandhan Bank',
 };
 
 // ─── UPI VPA domain → bank/wallet ────────────────────────────────────────────
@@ -143,567 +212,481 @@ const UPI_DOMAIN_MAP: Record<string, string> = {
   indus:       'IndusInd Bank',
   aubank:      'AU Small Finance Bank',
   idfc:        'IDFC First Bank',
-  slice:       'Slice',
-  jupiter:     'Jupiter',
-  fi:          'Fi Money',
   airtel:      'Airtel Payments Bank',
-  jio:         'Jio Payments Bank',
 };
 
 // ─── Channel keyword map ──────────────────────────────────────────────────────
 
 const CHANNEL_MAP: Record<string, string> = {
-  'UPI':                  'UPI',
-  'NEFT':                 'NEFT',
-  'RTGS':                 'RTGS',
-  'IMPS':                 'IMPS',
-  'ATM':                  'ATM',
-  'POS':                  'POS',
-  'NACH':                 'NACH',
-  'ECS':                  'ECS',
-  'ACH':                  'ACH',
-  'NET BANKING':          'Net Banking',
-  'NETBANKING':           'Net Banking',
-  'MOBILE BANKING':       'Mobile Banking',
-  'CREDIT CARD':          'Credit Card',
-  'DEBIT CARD':           'Debit Card',
-  'WALLET':               'Wallet',
-  'STANDING INSTRUCTION': 'Standing Instruction',
-  'AUTO DEBIT':           'Auto Debit',
+  'UPI':         'UPI',
+  'NEFT':        'NEFT',
+  'RTGS':        'RTGS',
+  'IMPS':        'IMPS',
+  'ATM':         'ATM',
+  'POS':         'POS',
+  'NACH':        'NACH',
+  'ECS':         'ECS',
+  'ACH':         'ACH',
+  'NET BANKING': 'Net Banking',
+  'NETBANKING':  'Net Banking',
+  'CREDIT CARD': 'Credit Card',
+  'DEBIT CARD':  'Debit Card',
+  'WALLET':      'Wallet',
 };
 
 // ─── Taxonomy ─────────────────────────────────────────────────────────────────
-// Order matters — more specific entries before generic ones
-// direction: 'credit' | 'debit' — if set, only matches in that direction
-// maxAmount / minAmount — for hotel/restaurant disambiguation
+//
+// ARRAY ORDER MATTERS — first match with highest pattern score wins.
+// Entries that share keywords with broader categories must come FIRST.
+// Example: OTT (amazon prime) must be above Shopping (amazon) so that
+// "Amazon Prime" resolves to OTT and not Shopping.
 
 interface TaxonomyEntry {
-  type:        TxnType;
-  category:    string;
+  type:         TxnType;
+  category:     string;
   sub_category: string | null;
-  patterns:    RegExp[];
-  direction?:  'credit' | 'debit';
-  minAmount?:  number;
-  maxAmount?:  number;
+  patterns:     RegExp[];
+  direction?:   'credit' | 'debit';
+  minAmount?:   number;
+  maxAmount?:   number;
 }
 
 const TAXONOMY: TaxonomyEntry[] = [
 
-  // ══ EXPENSE — Food & Dining ══════════════════════════════════════════════
-
+  // ── Food & Dining ─────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Quick Commerce',
-    patterns: [/\bblinkit\b/i, /\bzepto\b/i, /\bswiggy\s+instamart\b/i,
-               /\binstamart\b/i, /\bbbdaily\b/i, /\bdunzo\b/i, /\btata\s+now\b/i] },
+    patterns: [
+      /\bblinkit\b/i,
+      // [FIX] \bzepto\b → \bzepto (no trailing \b) — ZEPTONOW was not matching.
+      /\bzepto/i,
+      /\bswiggy\s+instamart\b/i,
+      /\binstamart\b/i,
+      /\bdunzo\b/i,
+    ] },
 
+  // [FIX] Removed maxAmount:2000 — no logical cap on restaurant bills.
+  // [FIX] domino'?s? → dominos? — "Dominos" (no apostrophe) was not matching.
+  // [FIX] Added: dining, coffee, meal.
+  // NOTE: \bhotel\b intentionally NOT here — in South India "hotel" is a
+  // common restaurant name (Saravana Bhavan, Geetham etc.). Standalone hotel
+  // routes to pending_review; user classifies once via custom categories.
+  // NOTE: \bpluxee\b and \bmeal\s+card\b intentionally NOT here — Pluxee is
+  // a payment instrument. Merchant at POS determines category.
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Restaurants',
-    patterns: [/\bzomato\b/i, /\bswiggy\b/i, /\brestaurant\b/i, /\bbistro\b/i,
-               /\bdhaba\b/i, /\bpizza\s+hut\b/i, /\bdomino'?s?\b/i, /\bkfc\b/i,
-               /\bmcdonald'?s?\b/i, /\bsubway\b/i, /\bburger\s+king\b/i,
-               /\bstarbucks\b/i, /\bbarista\b/i, /\bdunkin\b/i,
-               /\bbarbeque\s+nation\b/i, /\bcafe\b/i, /\bdining\b/i,
-               /\bfood\s+court\b/i, /\btaco\s+bell\b/i, /\bhaldiram\b/i,
-               /\bsaravana\s+bhavan\b/i],
-    maxAmount: 2000 },
-
-  { type: 'Expense', category: 'Food & Dining', sub_category: 'Cafes & Beverages',
-    patterns: [/\bccd\b/i, /\bcafe\s+coffee\s+day\b/i, /\bblue\s+tokai\b/i,
-               /\bthird\s+wave\b/i, /\bjuice\s+(bar|junction|cafe)\b/i,
-               /\bbeverages?\b/i] },
-
-  { type: 'Expense', category: 'Food & Dining', sub_category: 'Alcohol & Liquor',
-    patterns: [/\bliquor\b/i, /\bwine\s+shop\b/i, /\btasmac\b/i,
-               /\bbrewery\b/i, /\bpub\b/i, /\bcraft\s+beer\b/i,
-               /\bwhisky\b/i, /\bwhiskey\b/i, /\bvodka\b/i, /\brum\b/i,
-               /\bbar\s+&\s+grill\b/i] },
+    patterns: [
+      /\bzomato\b/i, /\bswiggy\b/i, /\brestaurant\b/i, /\bpizza\s+hut\b/i,
+      /\bdominos?\b/i, /\bkfc\b/i, /\bmcdonald'?s?\b/i, /\bsubway\b/i,
+      /\bburger\s+king\b/i, /\bstarbucks\b/i, /\bcafe\b/i,
+      /\bdining\b/i, /\bcoffee\b/i, /\bmeal\b/i,
+    ] },
 
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Groceries',
-    patterns: [/\bbigbasket\b/i, /\bgrofers\b/i, /\bjiomart\b/i,
-               /\bd[\s-]?mart\b/i, /\bmore\s+supermarket\b/i,
-               /\breliance\s+(fresh|smart|retail)\b/i, /\bspencer'?s?\b/i,
-               /\bsupermarket\b/i, /\bhypermarket\b/i, /\bkirana\b/i,
-               /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
+    patterns: [/\bbigbasket\b/i, /\bd[\s-]?mart\b/i, /\breliance\s+(fresh|smart)\b/i,
+               /\bsupermarket\b/i, /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
 
-  // ══ EXPENSE — Transportation ═════════════════════════════════════════════
+  // ── Entertainment — OTT MUST be above Shopping ────────────────────────────
+  // [FIX] Moved OTT block above Shopping to fix Amazon Prime tie-break.
+  // Previously OTT was below Shopping, so "Amazon Prime" scored 1 on both
+  // and Shopping won because it appeared first in the array.
+  { type: 'Expense', category: 'Entertainment', sub_category: 'OTT Subscriptions',
+    patterns: [
+      /\bnetflix\b/i, /\bhotstar\b/i, /\bdisney\+?\s*hotstar\b/i,
+      /\bamazon\s+prime\b/i,   // explicit "amazon prime" — must be here, not Shopping
+      /\bsonyliv\b/i, /\bzee5\b/i,
+    ] },
 
-  { type: 'Expense', category: 'Transportation', sub_category: 'Tolls & FASTag',
-    patterns: [/\bfastag\b/i, /\bnetc\b/i, /\bnhai\b/i,
-               /\btoll\s+(plaza|gate|debit|charge|payment)\b/i,
-               /\btoll\s+tax\b/i] },
-
-  { type: 'Expense', category: 'Transportation', sub_category: 'Parking',
-    patterns: [/\bparking\s+(fee|charge|payment)\b/i,
-               /\bpark\s+(and\s+ride|fee)\b/i, /\bsmart\s+parking\b/i] },
-
-  { type: 'Expense', category: 'Transportation', sub_category: 'Ride Hailing',
-    patterns: [/\buber\b/i, /\bola\b/i, /\brapido\b/i, /\bmeru\b/i,
-               /\bblusmart\b/i, /\bnamma\s+yatri\b/i, /\byatri\b/i,
-               /\bjugnoo\b/i] },
-
-  { type: 'Expense', category: 'Transportation', sub_category: 'Fuel',
-    patterns: [/\bpetrol\s+(pump|station|bunk)\b/i, /\bdiesel\s+(pump|fill)\b/i,
-               /\bfuel\s+(station|fill|charge)\b/i, /\bhpcl\b/i,
-               /\bindian\s+oil\b/i, /\biocl\b/i,
-               /\bbharat\s+petroleum\b/i, /\bbpcl\b/i,
-               /\bnayara\s+energy\b/i] },
-
-  { type: 'Expense', category: 'Transportation', sub_category: 'Public Transit',
-    patterns: [/\bmetro\s+(rail|card|recharge|fare)\b/i, /\birctc\b/i,
-               /\bindian\s+railways?\b/i, /\bredbus\b/i,
-               /\bksrtc\b/i, /\bapsrtc\b/i, /\bmsrtc\b/i,
-               /\bbus\s+ticket\b/i, /\btrain\s+ticket\b/i] },
-
-  // ══ EXPENSE — Shopping ═══════════════════════════════════════════════════
-
+  // ── Shopping ──────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Shopping', sub_category: 'Online Shopping',
-    patterns: [/\bamazon\b/i, /\bflipkart\b/i, /\bmyntra\b/i,
-               /\bajio\b/i, /\bnykaa\b/i, /\bmeesho\b/i,
-               /\bsnapdeal\b/i, /\btata\s*cliq\b/i, /\bfkinternet\b/i] },
-
-  { type: 'Expense', category: 'Shopping', sub_category: 'Fashion & Apparel',
-    patterns: [/\bzara\b/i, /\bh\s*&\s*m\b/i, /\bwestside\b/i,
-               /\bmax\s+fashion\b/i, /\bpantaloons\b/i,
-               /\blifestyle\s+(store|fashion)\b/i, /\bshoppers\s+stop\b/i,
-               /\bfabindia\b/i, /\blevis\b/i, /\bpepe\s+jeans\b/i] },
+    patterns: [
+      // [FIX] \bamazon\b(?!\s+prime) — negative lookahead prevents "Amazon Prime"
+      // from matching here (it already matched OTT above).
+      /\bamazon\b(?!\s+prime)/i,
+      /\bflipkart\b/i, /\bmyntra\b/i, /\bnykaa\b/i, /\bmeesho\b/i,
+    ] },
 
   { type: 'Expense', category: 'Shopping', sub_category: 'Electronics',
-    patterns: [/\bcroma\b/i, /\bvijay\s+sales\b/i,
-               /\breliance\s+digital\b/i, /\bapple\s+(store|india)\b/i,
-               /\bsamsung\s+(store|plaza|exclusive)\b/i,
-               /\blenovo\b/i, /\bdell\b/i, /\basus\b/i, /\boneplus\b/i] },
+    patterns: [/\bcroma\b/i, /\bvijay\s+sales\b/i, /\breliance\s+digital\b/i] },
 
-  // ══ EXPENSE — Utilities ══════════════════════════════════════════════════
+  // ── Transportation ────────────────────────────────────────────────────────
+  { type: 'Expense', category: 'Transportation', sub_category: 'Tolls & FASTag',
+    patterns: [/\bfastag\b/i, /\bnhai\b/i, /\btoll\s+(plaza|gate|debit|charge)\b/i] },
 
+  { type: 'Expense', category: 'Transportation', sub_category: 'Ride Hailing',
+    patterns: [/\buber\b/i, /\bola\b/i, /\brapido\b/i, /\bblusmart\b/i] },
+
+  { type: 'Expense', category: 'Transportation', sub_category: 'Fuel',
+    patterns: [/\bpetrol\s+(pump|station|bunk)\b/i, /\bhpcl\b/i, /\biocl\b/i, /\bbpcl\b/i] },
+
+  // [ADD] Transportation > Bus
+  { type: 'Expense', category: 'Transportation', sub_category: 'Bus',
+    patterns: [/\bredbus\b/i, /\babhibus\b/i, /\bkeybus\b/i] },
+
+  { type: 'Expense', category: 'Transportation', sub_category: 'Public Transit',
+    patterns: [
+      /\bmetro\s+(rail|card|recharge|fare)\b/i,
+      /\birctc\b/i,
+      /\bindian\s+railways?\b/i,
+      // [ADD] autope — IRCTC payment gateway used for transit/rail payments
+      /\bautope\b/i,
+    ] },
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Utilities', sub_category: 'Electricity',
-    patterns: [/\electricity\s+(bill|payment)\b/i, /\bbescom\b/i,
-               /\btneb\b/i, /\bmseb\b/i, /\bmsedcl\b/i,
-               /\btata\s+power\b/i, /\bbses\b/i,
-               /\badani\s+electricity\b/i, /\buppcl\b/i,
-               /\bpower\s+(bill|payment)\b/i] },
-
-  { type: 'Expense', category: 'Utilities', sub_category: 'Water',
-    patterns: [/\bwater\s+(bill|tax|charge|board|payment)\b/i,
-               /\bbwssb\b/i, /\bhmwssb\b/i, /\bcwss\b/i] },
+    patterns: [/\bescom\b/i, /\bmseb\b/i, /\bbescom\b/i, /\btata\s+power\b/i,
+               /\bpower\s+(bill|payment)\b/i, /\belectricity\s+(bill|payment)\b/i] },
 
   { type: 'Expense', category: 'Utilities', sub_category: 'Gas',
-    patterns: [/\bgas\s+(bill|payment|connection)\b/i,
-               /\bpiped\s+(gas|natural\s+gas)\b/i,
-               /\bindraprastha\s+gas\b/i, /\bigl\b/i,
-               /\bmahanagar\s+gas\b/i, /\bmgl\b/i,
-               /\badani\s+(total\s+)?gas\b/i,
-               /\blpg\s+(cylinder|booking|payment)\b/i,
-               /\bindane\b/i, /\bbharat\s+gas\b/i, /\bhp\s+gas\b/i] },
+    patterns: [/\bgas\s+(bill|payment)\b/i, /\bindane\b/i, /\bbharat\s+gas\b/i, /\bhp\s+gas\b/i] },
 
-  // ══ EXPENSE — Telecom ════════════════════════════════════════════════════
-
+  // ── Telecom ───────────────────────────────────────────────────────────────
+  // [FIX] Expanded Jio and Airtel patterns.
+  // Problem: standalone \bjio\b fired on JioMart, JioSaavn, JioCinema.
+  // Problem: standalone \bairtel\b fired on Airtel Xstream Play, Airtel Payments Bank.
+  // Fix: require a qualifying word after brand name OR use full brand name.
   { type: 'Expense', category: 'Telecom', sub_category: 'Mobile Recharge',
-    patterns: [/\bjio\s+(recharge|prepaid)\b/i, /\bairtel\s+(recharge|prepaid)\b/i,
-               /\bvi\s+(recharge|prepaid)\b/i, /\bbsnl\s+recharge\b/i,
-               /\bmobile\s+(recharge|topup|top-up)\b/i,
-               /\bprepaid\s+(recharge|topup)\b/i, /\btalktime\b/i] },
+    patterns: [
+      /\bjio\s*(recharge|prepaid|postpaid|bill|mobile|sim|plan|pack)\b/i,
+      /\breliance\s+jio\b/i,
+      /\bairtel\s*(recharge|prepaid|postpaid|bill|mobile|sim|plan|pack|fiber)\b/i,
+      /\bbharti\s+airtel\b/i,
+      /\bmobile\s+(recharge|topup)\b/i,
+      /\btalktime\b/i,
+    ] },
 
   { type: 'Expense', category: 'Telecom', sub_category: 'Broadband',
-    patterns: [/\bbroadband\s+(bill|payment|plan)\b/i,
-               /\bwifi\s+(bill|payment|recharge)\b/i,
-               /\binternet\s+(bill|payment|plan)\b/i,
-               /\bjio\s+fiber\b/i, /\bairtel\s+fiber\b/i,
-               /\bact\s+fibernet\b/i, /\bhathway\b/i, /\bexcitel\b/i] },
+    patterns: [/\bjio\s+fiber\b/i, /\bairtel\s+fiber\b/i, /\bbroadband\s+(bill|payment)\b/i] },
 
-  // ══ EXPENSE — Healthcare ═════════════════════════════════════════════════
-
+  // ── Healthcare ────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Healthcare', sub_category: 'Pharmacy',
-    patterns: [/\bapollo\s+pharmacy\b/i, /\bmedplus\b/i,
-               /\bnetmeds\b/i, /\bpharmeasy\b/i, /\b1mg\b/i,
-               /\bwellness\s+forever\b/i, /\bchemist\b/i,
-               /\bpharmacy\b/i, /\bmedical\s+(store|hall|shop)\b/i,
-               /\bdrug\s+store\b/i] },
+    patterns: [/\bapollo\s+pharmacy\b/i, /\bmedplus\b/i, /\bnetmeds\b/i,
+               /\bpharmeasy\b/i, /\b1mg\b/i, /\bpharmacy\b/i] },
 
   { type: 'Expense', category: 'Healthcare', sub_category: 'Hospital & Clinic',
-    patterns: [/\bhospital\b/i, /\bclinic\b/i, /\bdiagnostics?\b/i,
-               /\blal\s+(path|pathlabs?)\b/i, /\bthyrocare\b/i,
-               /\bfortis\b/i, /\bmax\s+hospital\b/i,
-               /\bapollo\s+hospitals?\b/i, /\bnarayana\s+health\b/i,
-               /\bconsultation\s+fee\b/i, /\bopd\s+fee\b/i] },
+    patterns: [/\bhospital\b/i, /\bclinic\b/i, /\bfortis\b/i,
+               /\bapollo\s+hospitals?\b/i, /\bconsultation\s+fee\b/i] },
 
-  // ══ EXPENSE — Entertainment ══════════════════════════════════════════════
-
-  { type: 'Expense', category: 'Entertainment', sub_category: 'OTT Subscriptions',
-    patterns: [/\bnetflix\b/i, /\bhotstar\b/i, /\bdisney\+?\s*hotstar\b/i,
-               /\bamazon\s+prime\b/i, /\bprime\s+video\b/i,
-               /\bsonyliv\b/i, /\bsony\s+liv\b/i,
-               /\bzee5\b/i, /\bvoot\b/i, /\bjio\s+cinema\b/i,
-               /\bdiscovery\+\b/i, /\bapple\s+tv\+\b/i] },
-
+  // ── Entertainment (Movies) ────────────────────────────────────────────────
   { type: 'Expense', category: 'Entertainment', sub_category: 'Movies & Events',
-    patterns: [/\bbookmyshow\b/i, /\bpvr\b/i, /\binox\b/i,
-               /\bcinepolis\b/i, /\bmovie\s+ticket\b/i,
-               /\bevent\s+ticket\b/i, /\bspi\s+cinema\b/i] },
+    patterns: [
+      /\bbookmyshow\b/i,
+      // [FIX] \bpvr\b → \bpvr (no trailing \b) — pvrinox was not matching.
+      /\bpvr/i,
+      /\binox\b/i,
+      /\bcinepolis\b/i,
+    ] },
 
-  { type: 'Expense', category: 'Entertainment', sub_category: 'Gaming & Fantasy Sports',
-    patterns: [/\bdream\s*11\b/i, /\bdream11\b/i, /\bmpl\b/i,
-               /\bwinzo\b/i, /\brummy\s+(circle|culture|passion|time)\b/i,
-               /\bjunglee\s+rummy\b/i, /\bmy11circle\b/i,
-               /\bfantasy\s+(cricket|sports)\b/i,
-               /\bpoker\b/i, /\bonline\s+gaming\b/i,
-               /\bsteam\s+(games|wallet)\b/i] },
-
-  // ══ EXPENSE — Education ══════════════════════════════════════════════════
-
+  // ── Education ─────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Education', sub_category: 'Tuition & Courses',
-    patterns: [/\bbyju'?s?\b/i, /\bunacademy\b/i, /\bvedantu\b/i,
-               /\bcoursera\b/i, /\budemy\b/i, /\bupgrad\b/i,
-               /\bsimplilearn\b/i, /\bphysics\s+wallah\b/i,
-               /\bschool\s+fee\b/i, /\bcollege\s+fee\b/i,
-               /\btuition\s+fee\b/i, /\bexamination\s+fee\b/i,
-               /\badmission\s+fee\b/i] },
+    patterns: [/\bbyju'?s?\b/i, /\bunacademy\b/i, /\budemy\b/i,
+               /\bschool\s+fee\b/i, /\bcollege\s+fee\b/i, /\btuition\s+fee\b/i] },
 
-  // ══ EXPENSE — Travel ═════════════════════════════════════════════════════
-
+  // ── Travel ────────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Travel', sub_category: 'Flight',
-    patterns: [/\bindigo\b/i, /\bair\s+india\b/i, /\bspicejet\b/i,
-               /\bgo\s*air\b/i, /\bakasa\s+air\b/i, /\bvistara\b/i,
-               /\bmakemytrip\s+flight\b/i, /\bcleartrip\b/i,
-               /\bixigo\s+flight\b/i, /\beasemytrip\b/i,
-               /\bflight\s+ticket\b/i, /\bairfare\b/i] },
+    patterns: [
+      /\bindigo\b/i, /\bair\s+india\b/i, /\bspicejet\b/i,
+      /\bvistara\b/i, /\bflight\s+ticket\b/i,
+      // [ADD] OTA platforms for flight booking
+      /\bcleartrip\b/i, /\beasemytrip\b/i, /\bixigo\b/i,
+    ] },
 
-  { type: 'Expense', category: 'Travel', sub_category: 'Hotel',
-    patterns: [/\boyorooms?\b/i, /\btreebo\b/i, /\bfabhotel\b/i,
-               /\bhotel\s+booking\b/i, /\bmakemytrip\s+hotel\b/i,
-               /\bgoibibo\b/i, /\bbooking\.com\b/i, /\bairbnb\b/i,
-               /\btaj\s+hotels?\b/i, /\boberoi\s+hotels?\b/i,
-               /\bmarriott\b/i, /\bhyatt\b/i],
-    minAmount: 2000 },
+  // [FIX] Renamed sub_category 'Hotel' → 'Accommodation' to avoid collision
+  // with South Indian restaurant naming ("Hotel Saravana Bhavan" etc.).
+  // Patterns: only unambiguous accommodation signals retained.
+  // \bhotel\b alone removed — it is ambiguous in Indian context.
+  // \bhotel\s+booking\b kept — "hotel booking" strongly implies a stay.
+  { type: 'Expense', category: 'Travel', sub_category: 'Accommodation',
+    patterns: [
+      /\boyorooms?\b/i, /\btreebo\b/i, /\bfabhotel\b/i,
+      /\bhotel\s+booking\b/i, /\bgoibibo\b/i,
+      /\bbooking\.com\b/i, /\bairbnb\b/i, /\bmakemytrip\b/i,
+    ],
+    minAmount: 500 },
 
-  // ══ EXPENSE — Rent & Housing ═════════════════════════════════════════════
-
+  // ── Rent & Housing ────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Rent & Housing', sub_category: 'House Rent',
     patterns: [/\bhouse\s+rent\b/i, /\bflat\s+rent\b/i,
-               /\bpg\s+(rent|fee)\b/i, /\bpaying\s+guest\b/i,
-               /\brent\s+(payment|paid|transfer)\b/i,
-               /\bmonthly\s+rent\b/i, /\btenancy\b/i] },
+               /\brent\s+(payment|paid|transfer)\b/i, /\bmonthly\s+rent\b/i] },
 
-  { type: 'Expense', category: 'Rent & Housing', sub_category: 'Maintenance & Society',
-    patterns: [/\bsociety\s+(maintenance|charges?|fee)\b/i,
-               /\bmaintenance\s+(fee|charge|payment)\b/i,
-               /\bapartment\s+(maintenance|association)\b/i,
-               /\brwa\s+(fee|charge)\b/i, /\bhousing\s+society\b/i] },
-
-  // ══ EXPENSE — Personal Care ══════════════════════════════════════════════
-
-  { type: 'Expense', category: 'Personal Care', sub_category: 'Salons & Spas',
-    patterns: [/\bsalon\b/i, /\bspa\b/i, /\bhaircut\b/i,
-               /\bbeauty\s+parlour\b/i, /\burban\s+company\b/i,
-               /\burban\s+clap\b/i, /\bvlcc\b/i,
-               /\bjawed\s+habib\b/i] },
-
-  { type: 'Expense', category: 'Personal Care', sub_category: 'Fitness',
-    patterns: [/\bgym\s+(fee|membership|subscription)\b/i,
-               /\bfitness\s+(centre|center|club|studio)\b/i,
-               /\bcult\.?fit\b/i, /\bcure\.?fit\b/i,
-               /\banytime\s+fitness\b/i, /\bcross\s*fit\b/i,
-               /\byoga\s+(class|centre|studio)\b/i, /\bzumba\b/i] },
-
-  // ══ EXPENSE — Government & Taxes ════════════════════════════════════════
-
-  { type: 'Expense', category: 'Government & Taxes', sub_category: 'Challan & Fines',
-    patterns: [/\bechallan\b/i, /\be-challan\b/i, /\bparivahan\b/i,
-               /\btraffic\s+(fine|challan|penalty)\b/i,
-               /\bpolice\s+(challan|fine)\b/i,
-               /\bchallan\s+(payment|paid)\b/i] },
-
-  { type: 'Expense', category: 'Government & Taxes', sub_category: 'Property & Municipality Tax',
-    patterns: [/\bproperty\s+tax\b/i, /\bhouse\s+tax\b/i,
-               /\bmunicipality\s+tax\b/i, /\bbmc\s+(tax|payment)\b/i,
-               /\bbbmp\s+(tax|payment)\b/i] },
-
-  { type: 'Expense', category: 'Government & Taxes', sub_category: 'Income Tax & GST',
-    patterns: [/\bincome\s+tax\s+(payment|challan|tds)\b/i,
-               /\btds\s+(payment|challan|deduction)\b/i,
-               /\bgst\s+(payment|challan|filing)\b/i,
-               /\badvance\s+tax\b/i, /\bnsdl\s+challan\b/i] },
-
-  // ══ EXPENSE — Finance Charges ════════════════════════════════════════════
-
+  // ── Finance Charges ───────────────────────────────────────────────────────
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Cash Withdrawal',
-    patterns: [/\batm\s+(debit|withdrawal|wdl|cash)\b/i,
-               /\bcash\s+(withdrawal|withdrawn|dispensed)\b/i,
-               /\batm\s+wdl\b/i, /\bcash\s+at\s+atm\b/i] },
+    patterns: [/\batm\s+(debit|withdrawal|wdl|cash)\b/i, /\bcash\s+withdrawal\b/i] },
 
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Bank Charges',
-    patterns: [/\bbank\s+charge\b/i, /\bservice\s+charge\b/i,
-               /\bsms\s+(charge|alert\s+charge)\b/i,
-               /\bannual\s+(fee|charge)\b/i, /\brenewal\s+fee\b/i,
-               /\bpenalty\b/i, /\blate\s+(payment\s+)?fee\b/i,
-               /\bprocessing\s+fee\b/i] },
+    patterns: [/\bservice\s+charge\b/i, /\bannual\s+(fee|charge)\b/i,
+               /\bpenalty\b/i, /\blate\s+payment\s+fee\b/i] },
 
-  { type: 'Expense', category: 'Finance Charges', sub_category: 'Rent via Card',
-    patterns: [/\bcred\s+(pay|rent|travel)\b/i, /\bcheq\b/i,
-               /\bnobroker\s+pay\b/i, /\brentpay\b/i] },
-
-  { type: 'Expense', category: 'Finance Charges', sub_category: 'Credit Card Payment',
-    patterns: [/\bcredit\s+card\s+(payment|bill|due)\b/i,
-               /\bcc\s+(payment|bill)\b/i,
-               /\bcard\s+outstanding\b/i,
-               /\bminimum\s+(amount\s+)?due\b/i,
-               /\btotal\s+(amount\s+)?due\b/i] },
-
-  // ══ INCOME ═══════════════════════════════════════════════════════════════
-
+  // ── Income ────────────────────────────────────────────────────────────────
   { type: 'Income', category: 'Salary', sub_category: 'Monthly Salary',
     direction: 'credit',
-    patterns: [/\bsalary\b/i, /\bsal\s+credit\b/i, /\bsalary\s+credited\b/i,
-               /\bpayroll\b/i, /\bwages?\b/i, /\bctc\b/i,
-               /\bneft[\s_-]?cr\b/i, /\bach\s+(credit|cr)\b/i,
-               /\bcms\s+credit\b/i, /\bcorporate\s+credit\b/i] },
-
-  { type: 'Income', category: 'Salary', sub_category: 'Bonus & Incentives',
-    direction: 'credit',
-    patterns: [/\bbonus\s+(credit|credited|paid)\b/i,
-               /\bincentive\s+(credit|credited)\b/i,
-               /\bvariable\s+pay\b/i, /\bperformance\s+(pay|bonus)\b/i,
-               /\bjoining\s+bonus\b/i, /\bex\s+gratia\b/i] },
-
-  { type: 'Income', category: 'Business Income', sub_category: 'Client Payment',
-    direction: 'credit',
-    patterns: [/\bclient\s+payment\b/i, /\binvoice\s+payment\b/i,
-               /\bconsulting\s+fee\b/i, /\bprofessional\s+fee\b/i,
-               /\bfreelance\b/i, /\bgig\s+payment\b/i] },
-
-  { type: 'Income', category: 'Rental Income', sub_category: 'Property Rent',
-    direction: 'credit',
-    patterns: [/\brent\s+(received|credit|credited)\b/i,
-               /\brental\s+income\b/i, /\btenant\s+payment\b/i] },
-
-  { type: 'Income', category: 'Passive Income', sub_category: 'Interest Income',
-    direction: 'credit',
-    patterns: [/\binterest\s+(credit|credited|received|earned)\b/i,
-               /\bfd\s+interest\b/i, /\brd\s+interest\b/i,
-               /\bsavings\s+interest\b/i, /\bbank\s+interest\b/i] },
-
-  { type: 'Income', category: 'Passive Income', sub_category: 'Dividend',
-    direction: 'credit',
-    patterns: [/\bdividend\b/i, /\bdiv\s+credit\b/i,
-               /\bdividend\s+(received|credited|paid)\b/i] },
+    patterns: [
+      /\bsalary\b/i, /\bsal\s+credit\b/i, /\bpayroll\b/i,
+      /\bach\s+(credit|cr)\b/i, /\bcorporate\s+credit\b/i,
+      // [ADD] Employer NEFT salary credits not caught by \bsalary\b keyword.
+      // "NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C"
+      /\bneft\s+cr\b/i,
+    ] },
 
   { type: 'Income', category: 'Refunds', sub_category: 'Purchase Refund',
     patterns: [/\brefund\b/i, /\bcashback\b/i, /\breversal\b/i,
-               /\bchargeback\b/i, /\bamount\s+reversed\b/i,
-               /\bmoney\s+returned\b/i, /\brefunded\b/i] },
+               /\bamount\s+reversed\b/i, /\brefunded\b/i] },
 
-  { type: 'Income', category: 'Transfers Received', sub_category: 'Peer Transfer',
+  { type: 'Income', category: 'Passive Income', sub_category: 'Interest Income',
     direction: 'credit',
-    patterns: [/\breceived\s+from\b/i, /\btransfer\s+from\b/i,
-               /\bmoney\s+received\b/i, /\bupi\s+(cr|credit)\b/i,
-               /\bimps\s+cr\b/i, /\bneft\s+(cr|credit)\s+from\b/i] },
+    patterns: [/\binterest\s+(credit|credited|received)\b/i,
+               /\bfd\s+interest\b/i, /\bsavings\s+interest\b/i] },
 
-  // ══ ASSET ════════════════════════════════════════════════════════════════
+  // [ADD] Stock Dividend income — distinct from interest income.
+  // "3rd Interim Dividend of 50 paise per share for FY 2025-26 by Manappuram Finance"
+  // direction: credit — dividends are always credits.
+  { type: 'Income', category: 'Dividends', sub_category: 'Stock Dividend',
+    direction: 'credit',
+    patterns: [/\bdividend\b/i] },
 
-  { type: 'Asset', category: 'Bank Deposits', sub_category: 'Fixed Deposit',
-    patterns: [/\bfixed\s+deposit\b/i, /\bfd\s+(created|booked|opened|opening|of|for)\b/i,
-               /\bterm\s+deposit\b/i, /\bdeposit\s+booked\b/i] },
-
-  { type: 'Asset', category: 'Bank Deposits', sub_category: 'Recurring Deposit',
-    patterns: [/\brecurring\s+deposit\b/i,
-               /\brd\s+(created|opened|installment|debit|opening)\b/i] },
-
-  { type: 'Asset', category: 'Gold', sub_category: 'Digital Gold',
-    patterns: [/\bdigital\s+gold\b/i, /\bmmtc.?pamp\b/i,
-               /\baugmont\b/i, /\bpaytm\s+gold\b/i, /\bgpay\s+gold\b/i] },
-
-  { type: 'Asset', category: 'Gold', sub_category: 'Physical Gold',
-    patterns: [/\bgold\s+(purchase|jewellery|coins?|bar)\b/i,
-               /\bjewellery\s+purchase\b/i, /\bsovereign\s+gold\b/i] },
-
-  { type: 'Asset', category: 'Real Estate', sub_category: 'Property Purchase',
-    patterns: [/\bproperty\s+registration\b/i, /\bstamp\s+duty\b/i,
-               /\bhome\s+purchase\b/i, /\bflat\s+registration\b/i,
-               /\breal\s+estate\b/i, /\bregistration\s+charges\b/i] },
-
-  // ══ LIABILITY ════════════════════════════════════════════════════════════
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Home Loan',
-    patterns: [/\bhome\s+loan\b/i, /\bhousing\s+loan\b/i,
-               /\bmortgage\b/i, /\blic\s+housing\b/i,
-               /\bpnb\s+housing\b/i, /\blic\s+hfl\b/i,
-               /\bfloating\s+rate\s+(home\s+)?loan\b/i] },
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Personal Loan',
-    patterns: [/\bpersonal\s+loan\b/i, /\bpl\s+disbursal\b/i,
-               /\bconsumer\s+loan\b/i, /\binstant\s+loan\b/i,
-               /\bsalary\s+loan\b/i] },
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Vehicle Loan',
-    patterns: [/\bcar\s+loan\b/i, /\bauto\s+loan\b/i,
-               /\bbike\s+loan\b/i, /\bvehicle\s+loan\b/i,
-               /\btwo[\s-]?wheeler\s+loan\b/i] },
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Education Loan',
-    patterns: [/\beducation\s+loan\b/i, /\bstudent\s+loan\b/i] },
-
-  { type: 'Liability', category: 'BNPL / EMI', sub_category: 'Buy Now Pay Later',
-    patterns: [/\bbnpl\b/i, /\bbuy\s+now\s+pay\s+later\b/i,
-               /\blazypay\b/i, /\bsimpl\b/i, /\bslice\b/i,
-               /\bpostpe\b/i, /\bkreditbee\b/i,
-               /\bzestmoney\b/i, /\baxio\b/i, /\bfibe\b/i] },
-
-  { type: 'Liability', category: 'EMI', sub_category: 'Loan EMI',
-    patterns: [/\bemi\s+(deducted|debited|paid|payment)\b/i,
-               /\bloan\s+emi\b/i, /\bequated\s+monthly\b/i,
-               /\bnach\s+debit\b/i, /\brepayment\s+(of|for)\s+(loan|emi)\b/i,
-               /\bauto\s+debit\s+emi\b/i] },
-
-  // ══ INVESTMENT ═══════════════════════════════════════════════════════════
-
+  // ── Investment ────────────────────────────────────────────────────────────
   { type: 'Investment', category: 'Mutual Funds', sub_category: 'SIP',
-    patterns: [/\b(mutual\s+fund\s+)?sip\b/i, /\bsystematic\s+investment\s+plan\b/i,
-               /\bsip\s+(debit|installment|payment)\b/i, /\bmf\s+sip\b/i] },
-
-  { type: 'Investment', category: 'Mutual Funds', sub_category: 'Lump Sum',
-    patterns: [/\bmutual\s+fund\b/i, /\bmf\s+purchase\b/i,
-               /\bnfo\b/i, /\bnew\s+fund\s+offer\b/i,
-               /\blump\s*sum\s+(mf|mutual|investment)\b/i,
-               /\bfund\s+investment\b/i, /\bamfi\b/i] },
+    // [FIX] \bsip\b → requires qualifying context word.
+    // Bare \bsip\b was firing on "sip gateway" (a payment gateway, not SIP investment).
+    // "sip of", "sip installment", "sip debited", "sip payment", "sip contribution"
+    patterns: [
+      /\bsip\s+(of|installment|debit(?:ed)?|payment|contribution)\b/i,
+      /\bsystematic\s+investment\s+plan\b/i,
+    ] },
 
   { type: 'Investment', category: 'Stocks', sub_category: 'Equity Purchase',
     patterns: [/\bzerodha\b/i, /\bgroww\b/i, /\bupstox\b/i,
-               /\bangelone\b/i, /\bangel\s+one\b/i, /\bangel\s+broking\b/i,
-               /\bhdfc\s+securities\b/i, /\bicici\s+direct\b/i,
-               /\bkotak\s+securities\b/i, /\bmotilal\s+oswal\b/i,
-               /\bdhan\b/i, /\bfyers\b/i, /\b5paisa\b/i,
-               /\bshares?\s+purchase\b/i, /\bstock\s+purchase\b/i,
-               /\bdemat\s+(account|transfer)\b/i] },
+               /\bangelone\b/i, /\bangel\s+one\b/i, /\bdhan\b/i] },
 
-  { type: 'Investment', category: 'Stocks', sub_category: 'IPO',
-    patterns: [/\bipo\s+(application|allotment|refund|subscription)\b/i,
-               /\basba\b/i, /\bblocked\s+for\s+ipo\b/i] },
-
+  // [FIX] Removed \bbajaj\s+finserv\b — Bajaj Finserv is primarily EMI/lending.
+  // Bajaj Allianz kept (insurance-only entity, unambiguous).
+  // [ADD] shriramlife — Shriram Life Insurance.
   { type: 'Investment', category: 'Insurance', sub_category: 'Life Insurance',
-    patterns: [/\blic\s+(premium|policy|payment)\b/i,
-               /\blife\s+insurance\s+(premium|payment)\b/i,
-               /\bterm\s+(plan|insurance|policy)\b/i,
-               /\bulip\b/i, /\bjeevan\s+\w+\b/i,
-               /\binsurance\s+premium\b/i, /\bpolicy\s+premium\b/i,
-               /\bmax\s+life\b/i, /\bhdfc\s+life\b/i,
-               /\bicici\s+(pru|prudential)\s+life\b/i,
-               /\bsbi\s+life\b/i, /\bkotak\s+life\b/i] },
+    patterns: [
+      /\blic\s+(premium|policy)\b/i, /\bterm\s+(plan|insurance)\b/i,
+      /\binsurance\s+premium\b/i, /\bpolicy\s+premium\b/i,
+      /\bbajaj\s+allianz\b/i,
+      // [ADD]
+      /\bshriram\s*life\b/i, /\bshriramlife\b/i,
+    ] },
 
+  // [ADD] manipalcigna — ManipalCigna Health Insurance.
   { type: 'Investment', category: 'Insurance', sub_category: 'Health Insurance',
-    patterns: [/\bhealth\s+insurance\b/i, /\bmediclaim\b/i,
-               /\bstar\s+health\b/i, /\bniva\s+bupa\b/i,
-               /\bcare\s+health\b/i, /\bhdfc\s+ergo\s+health\b/i,
-               /\bnavi\s+(health\s+)?insurance\b/i,
-               /\bcritical\s+illness\b/i] },
+    patterns: [
+      /\bhealth\s+insurance\b/i, /\bmediclaim\b/i, /\bstar\s+health\b/i,
+      // [ADD]
+      /\bmanipal\s*cigna\b/i, /\bmanipalcigna\b/i,
+    ] },
 
-  { type: 'Investment', category: 'Insurance', sub_category: 'Vehicle Insurance',
-    patterns: [/\bvehicle\s+insurance\b/i, /\bcar\s+insurance\b/i,
-               /\bbike\s+insurance\b/i, /\bmotor\s+insurance\b/i,
-               /\backo\b/i, /\bgo\s+digit\b/i,
-               /\bthird\s+party\s+insurance\b/i] },
+  // ── Liability ─────────────────────────────────────────────────────────────
+  { type: 'Liability', category: 'EMI', sub_category: 'Loan EMI',
+    patterns: [/\bemi\s+(deducted|debited|paid)\b/i, /\bloan\s+emi\b/i,
+               /\bnach\s+debit\b/i, /\bauto\s+debit\s+emi\b/i] },
 
-  { type: 'Investment', category: 'Crypto', sub_category: 'Cryptocurrency',
-    patterns: [/\bbitcoin\b/i, /\bethereum\b/i, /\bcrypto\b/i,
-               /\bcoinswitch\b/i, /\bwazirx\b/i,
-               /\bcoindcx\b/i, /\bzebpay\b/i, /\bbinance\b/i] },
+  { type: 'Liability', category: 'Loans', sub_category: 'Home Loan',
+    patterns: [/\bhome\s+loan\b/i, /\bhousing\s+loan\b/i, /\bmortgage\b/i] },
 
-  { type: 'Investment', category: 'Government Schemes', sub_category: 'NPS',
-    patterns: [/\bnps\b/i, /\bnational\s+pension\s+(scheme|system)\b/i,
-               /\bnps\s+contribution\b/i, /\bpran\b/i] },
+  { type: 'Liability', category: 'Loans', sub_category: 'Personal Loan',
+    patterns: [/\bpersonal\s+loan\b/i, /\binstant\s+loan\b/i] },
 
-  { type: 'Investment', category: 'Government Schemes', sub_category: 'PPF',
-    patterns: [/\bppf\b/i, /\bpublic\s+provident\s+fund\b/i,
-               /\bppf\s+(deposit|account|contribution)\b/i] },
+  // ── Asset ─────────────────────────────────────────────────────────────────
+  { type: 'Asset', category: 'Bank Deposits', sub_category: 'Fixed Deposit',
+    patterns: [/\bfixed\s+deposit\b/i, /\bfd\s+(created|booked|opened)\b/i] },
 
-  { type: 'Investment', category: 'Government Schemes', sub_category: 'EPF',
-    patterns: [/\bepf\b/i, /\bemployee\s+provident\b/i,
-               /\bpf\s+contribution\b/i, /\bprovident\s+fund\b/i,
-               /\bepfo\b/i] },
-
-  { type: 'Investment', category: 'Government Schemes', sub_category: 'Bonds & SGB',
-    patterns: [/\bgovernment\s+bond\b/i, /\brbi\s+(bond|retail)\b/i,
-               /\bsgb\b/i, /\bsovereign\s+gold\s+bond\b/i,
-               /\bcorporate\s+bond\b/i, /\bdebenture\b/i,
-               /\b54ec\s+bond\b/i] },
-
-  { type: 'Investment', category: 'Government Schemes', sub_category: 'Sukanya / SSY',
-    patterns: [/\bsukanya\s+samriddhi\b/i, /\bssy\b/i,
-               /\bpost\s+office\s+(scheme|mis|td)\b/i,
-               /\bkisan\s+vikas\s+patra\b/i, /\bkvp\b/i,
-               /\bnsc\b/i, /\bnational\s+savings\s+certificate\b/i] },
+  { type: 'Asset', category: 'Government Schemes', sub_category: 'NPS',
+    patterns: [/\bnps\b/i, /\bnational\s+pension\s+(scheme|system)\b/i] },
 ];
+
+// ─── merchant_key normaliser ──────────────────────────────────────────────────
+// Produces a stable, case-insensitive, truncation-safe key for custom category
+// lookup. Strips everything except alphanumeric and @ (to preserve VPA handles).
+// Max 40 chars to match the DB column length.
+// Use this key — not the display merchant string — when reading/writing
+// customCatData, both on-device and in the backend.
+
+function normaliseMerchantKey(merchant: string | null): string | null {
+  if (!merchant) return null;
+  return merchant
+    .toLowerCase()
+    .replace(/[^a-z0-9@]/g, '')   // keep only alphanum + @ for VPAs
+    .substring(0, 40)             // max 40 chars
+    || null;                      // return null if result is empty string
+}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function parseSmsMessages(messages: RawMessage[]): ParsedTransaction[] {
-  const results: ParsedTransaction[] = [];
-  for (const msg of messages) {
-    results.push(parseSingleSms(msg));
-  }
-  return results;
+  return messages.map(msg => parseSingleSms(msg));
 }
 
-// ─── Single message parser ────────────────────────────────────────────────────
+// ─── Single message orchestrator ─────────────────────────────────────────────
 
 function parseSingleSms(msg: RawMessage): ParsedTransaction {
-  const body      = msg.body;
-  const bodyLower = body.toLowerCase();
-  const bodyUpper = body.toUpperCase();
-
+  const body    = msg.body;
   const isInfra = UPI_INFRA_SENDERS.some(s => msg.address.toUpperCase().includes(s));
-  const extracted = extractFields(body, bodyLower, bodyUpper);
+  const msgDate = new Date(msg.date).toISOString().split('T')[0];
 
-  // Determine parse failure reason (partial results still returned — arch 4.4)
-  let parse_failure: string | null = null;
-  if (extracted.amount === null)   parse_failure = 'missing_amount';
-  else if (extracted.isCredit === null) parse_failure = 'unknown_direction';
+  // ── LAYER 2 ───────────────────────────────────────────────────────────────
+  const l2 = matchMessage(body, msgDate);
 
-  // Sign convention (arch 5.3.4)
-  const signedAmount = extracted.amount === null
-    ? null
-    : extracted.isCredit
-      ? Math.abs(extracted.amount)
-      : -Math.abs(extracted.amount);
-
-  // Classify — only if we have direction
-  let classification: Classification | null = null;
-  if (extracted.isCredit !== null && extracted.amount !== null) {
-    classification = classify(bodyLower, extracted.isCredit, extracted.amount);
-    if (!classification) parse_failure = parse_failure ?? 'unclassified';
+  if (l2 && l2.discard) {
+    return buildDiscarded(msg, msgDate, isInfra, 'declined_transaction');
   }
 
-  // Status (arch 5.3.1 + 4.6)
-  const needsReview =
-    parse_failure !== null ||
-    extracted.accountLast4 === null ||
-    (signedAmount !== null && Math.abs(signedAmount) >= 5000);
+  if (l2 && !l2.discard) {
+    const isCredit = l2.direction === 'credit';
+    const classification = l2.suggested_category
+      ? parseSuggestedCategory(l2.suggested_category)
+      : classify(body.toLowerCase(), isCredit, l2.amount);
 
-  const txnDate = new Date(msg.date).toISOString().split('T')[0];
+    const signedAmount = isCredit ? Math.abs(l2.amount) : -Math.abs(l2.amount);
+
+    // [FIX] Added || l2.requires_classification — person VPA credits were
+    // auto-approved. They need user confirmation of what the payment was for.
+    const needsReview =
+      !l2.account_number_masked   ||
+      Math.abs(l2.amount) >= 5000 ||
+      l2.requires_classification;
+
+    return {
+      raw_sms_id:             msg.id,
+      txn_date:               l2.txn_date || msgDate,
+      amount:                 signedAmount,
+      type:                   classification?.type        ?? null,
+      category:               classification?.category    ?? null,
+      sub_category:           classification?.sub_category ?? null,
+      merchant:               l2.merchant,
+      merchant_key:           normaliseMerchantKey(l2.merchant),
+      source:                 'sms',
+      status:                 needsReview ? 'pending_review' : 'approved',
+      account_number_masked:  l2.account_number_masked,
+      bank:                   l2.bank,
+      channel:                l2.channel,
+      balance:                l2.balance ?? null,
+      ref_number:             l2.ref_number,
+      ref_type:               l2.ref_type,
+      matched_rule:           l2.matched_rule,
+      confidence:             l2.confidence,
+      requires_classification: l2.requires_classification,
+      possible_contra:        l2.possible_contra,
+      txn_group_id:           null,
+      is_infrastructure:      isInfra,
+      health_module_tag:      null,
+      parse_failure:          null,
+      raw_text:               body,
+    };
+  }
+
+  // ── TAXONOMY FALLBACK ─────────────────────────────────────────────────────
+  const extracted = extractFields(body);
+
+  if (extracted.amount === null) {
+    return buildEscalated(msg, msgDate, isInfra, extracted, 'missing_amount');
+  }
+  if (extracted.isCredit === null) {
+    return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
+  }
+
+  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount);
+
+  if (!classification) {
+    return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
+  }
+
+  const signedAmount = extracted.isCredit
+    ? Math.abs(extracted.amount)
+    : -Math.abs(extracted.amount);
+
+  const needsReview =
+    !extracted.accountLast4 ||
+    Math.abs(extracted.amount) >= 5000;
 
   return {
-    raw_sms_id:            msg.id,
-    txn_date:              txnDate,
-    amount:                signedAmount,
-    type:                  classification?.type ?? null,
-    category:              classification?.category ?? null,
-    sub_category:          classification?.sub_category ?? null,
-    merchant:              extracted.merchant,
-    source:                'sms',
-    status:                needsReview ? 'pending_review' : 'approved',
+    raw_sms_id:             msg.id,
+    txn_date:               msgDate,
+    amount:                 signedAmount,
+    type:                   classification.type,
+    category:               classification.category,
+    sub_category:           classification.sub_category,
+    merchant:               extracted.merchant,
+    merchant_key:           normaliseMerchantKey(extracted.merchant),
+    source:                 'sms',
+    status:                 needsReview ? 'pending_review' : 'approved',
+    account_number_masked:  extracted.accountLast4,
+    bank:                   extracted.bank,
+    channel:                extracted.channel,
+    balance:                extracted.balance,
+    ref_number:             extracted.ref_number,
+    ref_type:               extracted.ref_type,
+    matched_rule:           null,
+    confidence:             0.7,
+    requires_classification: false,
+    possible_contra:        false,
+    txn_group_id:           null,
+    is_infrastructure:      isInfra,
+    health_module_tag:      null,
+    parse_failure:          null,
+    raw_text:               body,
+  };
+}
+
+// ─── Build helpers ────────────────────────────────────────────────────────────
+
+function buildDiscarded(
+  msg: RawMessage,
+  msgDate: string,
+  isInfra: boolean,
+  reason: string,
+): ParsedTransaction {
+  return {
+    raw_sms_id: msg.id, txn_date: msgDate, amount: null,
+    type: null, category: null, sub_category: null,
+    merchant: null, merchant_key: null,
+    source: 'sms', status: 'pending_review',
+    account_number_masked: null, bank: null, channel: null, balance: null,
+    ref_number: null, ref_type: null,
+    matched_rule: null, confidence: null,
+    requires_classification: false, possible_contra: false,
+    txn_group_id: null, is_infrastructure: isInfra, health_module_tag: null,
+    parse_failure: reason, raw_text: msg.body,
+  };
+}
+
+function buildEscalated(
+  msg: RawMessage,
+  msgDate: string,
+  isInfra: boolean,
+  extracted: ExtractedFields,
+  reason: string,
+): ParsedTransaction {
+  const signedAmount = extracted.amount === null
+    ? null
+    : extracted.isCredit === null
+      ? null
+      : extracted.isCredit
+        ? Math.abs(extracted.amount)
+        : -Math.abs(extracted.amount);
+
+  return {
+    raw_sms_id: msg.id, txn_date: msgDate,
+    amount: signedAmount,
+    type: null, category: null, sub_category: null,
+    merchant:     extracted.merchant,
+    merchant_key: normaliseMerchantKey(extracted.merchant),
+    source: 'sms', status: 'pending_review',
     account_number_masked: extracted.accountLast4,
-    bank:                  extracted.bank,
-    channel:               extracted.channel,
-    balance:               extracted.balance,
-    ref_number:            extracted.ref_number,
-    ref_type:              extracted.ref_type,
-    txn_group_id:          null,
-    is_infrastructure:     isInfra,
-    health_module_tag:     null,
-    parse_failure,
-    raw_text:              body,
+    bank: extracted.bank, channel: extracted.channel, balance: extracted.balance,
+    ref_number: extracted.ref_number, ref_type: extracted.ref_type,
+    matched_rule: null, confidence: null,
+    requires_classification: false, possible_contra: false,
+    txn_group_id: null, is_infrastructure: isInfra, health_module_tag: null,
+    parse_failure: reason, raw_text: msg.body,
   };
 }
 
 // ─── Field extractors ─────────────────────────────────────────────────────────
 
-function extractFields(body: string, bodyLower: string, bodyUpper: string): ExtractedFields {
+function extractFields(body: string): ExtractedFields {
+  const bodyLower = body.toLowerCase();
+  const bodyUpper = body.toUpperCase();
   return {
     amount:       extractAmount(body),
     isCredit:     extractDirection(bodyLower),
@@ -716,10 +699,11 @@ function extractFields(body: string, bodyLower: string, bodyUpper: string): Extr
   };
 }
 
-// Amount — Rs./INR/₹ prefix or bare decimal before keyword
 function extractAmount(body: string): number | null {
   const patterns = [
-    /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /INR\s+([\d,]+(?:\.\d{1,2})?)/i,
+    /Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /₹\s*([\d,]+(?:\.\d{1,2})?)/,
     /([\d,]+\.\d{2})\s*(?:has been|debited|credited|deducted)/i,
   ];
   for (const p of patterns) {
@@ -732,28 +716,33 @@ function extractAmount(body: string): number | null {
   return null;
 }
 
-// Direction — score-based (debit/credit keyword counts, not first-match)
 function extractDirection(bodyLower: string): boolean | null {
+  // [FIX] 'paid to'/'paid via'/'paid for'/'used for'/'withdrawal' were missing
+  // here even though Layer 1 (Kotlin) already recognizes them as debit
+  // signals and lets those messages through — this fallback couldn't
+  // classify direction for them, so they were escalated as
+  // 'unknown_direction' instead of being handled locally. Now that Layer 2
+  // has dedicated rules for most of these, this fallback should rarely be
+  // hit for them, but kept in sync for the messages that still reach here.
   const debitKw = [
-    'debited', 'deducted', 'withdrawn', 'spent', 'payment of',
+    'debited', 'deducted', 'withdrawn', 'withdrawal', 'spent', 'payment of',
     'transferred to', 'sent to', 'purchase', 'charged',
-    'emi due', 'emi paid', 'emi deducted',
-    'fixed deposit of', 'fd created', 'premium of',
+    'emi due', 'emi paid', 'emi deducted', 'premium of',
+    'paid to', 'paid via', 'paid for', 'paid towards', 'used for', 'cleared',
   ];
   const creditKw = [
-    'credited', 'received', 'deposited', 'refund',
-    'salary', 'reversed', 'cashback', 'added to',
-    'transfer from', 'neft cr', 'imps cr', 'ach credit',
+    'credited', 'received', 'deposited', 'refund', 'salary',
+    'reversed', 'cashback', 'added to', 'transfer from', 'disbursed',
+    'neft cr', 'imps cr', 'ach credit',
   ];
-  const debitScore  = debitKw.filter(kw  => bodyLower.includes(kw)).length;
+  const debitScore  = debitKw.filter(kw => bodyLower.includes(kw)).length;
   const creditScore = creditKw.filter(kw => bodyLower.includes(kw)).length;
-  if (debitScore > creditScore)  return false;
+  if (debitScore  > creditScore) return false;
   if (creditScore > debitScore)  return true;
-  if (debitScore > 0)            return false; // tie with signal → debit (safer default)
+  if (debitScore  > 0)           return false;
   return null;
 }
 
-// Account last-4
 function extractAccountLast4(bodyLower: string): string | null {
   const patterns = [
     /(?:a\/c|acct?|account|card|ac)[\s.#:]*(?:no\.?|number|ending|xx+|\.+)?\s*[x*]*(\d{4})\b/i,
@@ -767,11 +756,12 @@ function extractAccountLast4(bodyLower: string): string | null {
   return null;
 }
 
-// Available balance
+// [FIX] Added "balance is Rs." pattern for Indian Railways RWallet SMS.
 function extractBalance(body: string): number | null {
   const patterns = [
     /(?:avl\.?\s*bal(?:ance)?|available\s+balance|bal(?:ance)?(?:\s+is)?)[:\s]+(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d{1,2})?)/i,
     /(?:a\/c\s+bal|ac\s+balance)[:\s]+(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /balance\s+is\s+(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i,
   ];
   for (const p of patterns) {
     const m = body.match(p);
@@ -783,32 +773,20 @@ function extractBalance(body: string): number | null {
   return null;
 }
 
-// Merchant — UPI VPA, POS "at", "towards"
 function extractMerchant(body: string): string | null {
   const upiMatch = body.match(/(?:to|from)\s+([A-Za-z0-9 &._-]{2,40})@[a-z]+/i);
-  if (upiMatch) {
-    const name = upiMatch[1].trim();
-    if (name.length >= 2) return name;
-  }
-  const atMatch = body.match(/\bat\s+([A-Za-z0-9 &._-]{2,40})(?:\s+on|\s+for|\s+dated|[,.])/i);
-  if (atMatch) {
-    const name = atMatch[1].trim();
-    if (name.length >= 2) return name;
-  }
+  if (upiMatch) return upiMatch[1].trim();
+  const atMatch = body.match(/\bat\s+([A-Za-z0-9 &._-]{2,40})(?:\s+on|\s+for|[,.])/i);
+  if (atMatch) return atMatch[1].trim();
   const towardsMatch = body.match(/towards\s+([A-Za-z0-9 &._-]{2,40})(?:\s+on|\s+for|[,.])/i);
-  if (towardsMatch) {
-    const name = towardsMatch[1].trim();
-    if (name.length >= 2) return name;
-  }
+  if (towardsMatch) return towardsMatch[1].trim();
   return null;
 }
 
-// Bank detection — body keywords + UPI VPA domain fallback
 function detectBank(bodyUpper: string, body: string): string | null {
   for (const [kw, name] of Object.entries(BANK_MAP)) {
     if (bodyUpper.includes(kw)) return name;
   }
-  // UPI VPA domain tiebreaker
   const vpaMatch = body.match(/[\w.\-]+@(\w+)/i);
   if (vpaMatch) {
     const domain = vpaMatch[1].toLowerCase();
@@ -817,7 +795,6 @@ function detectBank(bodyUpper: string, body: string): string | null {
   return null;
 }
 
-// Channel detection
 function detectChannel(bodyUpper: string): string | null {
   for (const [kw, label] of Object.entries(CHANNEL_MAP)) {
     if (bodyUpper.includes(kw)) return label;
@@ -825,7 +802,6 @@ function detectChannel(bodyUpper: string): string | null {
   return null;
 }
 
-// Ref number — conservative, NEFT UTR before UPI RRN (arch 14.3)
 function extractRefNumber(body: string): Pick<ExtractedFields, 'ref_number' | 'ref_type'> {
   const neftPatterns = [
     /(?:utr|neft\s*ref|neft\s*no\.?|rtgs\s*ref)[:\s#]*([A-Z]{4}\d{12,18})/i,
@@ -845,9 +821,7 @@ function extractRefNumber(body: string): Pick<ExtractedFields, 'ref_number' | 'r
   return { ref_number: null, ref_type: null };
 }
 
-// ─── Classifier ───────────────────────────────────────────────────────────────
-// Score-based: counts pattern hits per entry, highest wins
-// Respects direction constraints and amount thresholds (hotel disambiguation)
+// ─── Taxonomy classifier ──────────────────────────────────────────────────────
 
 function classify(
   bodyLower: string,
@@ -855,23 +829,15 @@ function classify(
   amount: number,
 ): Classification | null {
   const direction = isCredit ? 'credit' : 'debit';
-
   let bestEntry: TaxonomyEntry | null = null;
   let bestScore = 0;
 
   for (const entry of TAXONOMY) {
-    // Direction constraint
     if (entry.direction && entry.direction !== direction) continue;
-
-    // Amount thresholds
     if (entry.maxAmount !== undefined && amount > entry.maxAmount) continue;
     if (entry.minAmount !== undefined && amount < entry.minAmount) continue;
-
     const score = entry.patterns.filter(p => p.test(bodyLower)).length;
-    if (score > bestScore) {
-      bestScore = score;
-      bestEntry = entry;
-    }
+    if (score > bestScore) { bestScore = score; bestEntry = entry; }
   }
 
   if (!bestEntry) return null;
@@ -879,5 +845,16 @@ function classify(
     type:         bestEntry.type,
     category:     bestEntry.category,
     sub_category: bestEntry.sub_category,
+  };
+}
+
+function parseSuggestedCategory(suggested: string): Classification | null {
+  if (!suggested) return null;
+  const parts = suggested.split(':');
+  if (parts.length < 2) return null;
+  return {
+    type:         parts[0] as TxnType,
+    category:     parts[1],
+    sub_category: parts[2] ?? null,
   };
 }

@@ -18,6 +18,23 @@
  *                                 in getMessages(): -P suffix, pure numeric)
  *   passesLayer1Filter(body)   — body-first liberal filter, returns
  *                                 { pass: boolean, reason: string|null }
+ *
+ * Change log:
+ *   - [FIX] hasDirectionSignal only checked b.includes("avl bal") — the
+ *     abbreviated per-transaction form ("Avl Bal Rs.X"). It never matched
+ *     the spelled-out form banks use in recurring daily/EOD balance
+ *     broadcasts: "Available Bal in HDFC Bank A/c XX2875 as on
+ *     yesterday:01-APR-26 is INR 27,51,128.12." On days with no other
+ *     balance-bearing transaction SMS, this broadcast was the ONLY source
+ *     of balance data for the account — and it was being dropped entirely
+ *     (no_signal), not merely miscategorized downstream. Confirmed on a
+ *     real 90-180 day device export: 75/633 messages (11.8%) matched this
+ *     exact pattern, 0 of them passing before this fix. Mirrors the
+ *     identical fix in SmsReaderModule.kt. These are still not
+ *     transactions — see BALANCE_ALERT_ONLY in ruleset.js for how Layer 2
+ *     routes them to an accounts.balance_latest update instead of
+ *     pending_review once they reach it. This fix only ensures they aren't
+ *     discarded before they get that far.
  */
 
 // ─── Layer 0 — sender-level drops ─────────────────────────────────────────
@@ -130,7 +147,16 @@ function passesLayer1Filter(body) {
     b.includes("txn alert") || b.includes("transaction alert") ||
     b.includes("purchase of") || b.includes("payment received") ||
     b.includes("amount debited") || b.includes("amount credited") ||
-    b.includes("avl bal") || b.includes("balance after") ||
+    b.includes("avl bal") ||
+    // [FIX] "avl bal" only matches the abbreviated per-transaction form
+    // ("Avl Bal Rs.X"). It never matched the spelled-out form used in
+    // recurring daily/EOD balance broadcasts: "Available Bal in HDFC Bank
+    // A/c XX2875 as on yesterday:01-APR-26 is INR 27,51,128.12." Confirmed
+    // on real device data: 75/633 messages (11.8%) matched this exact
+    // pattern and were being lost entirely. Mirrors the identical fix in
+    // SmsReaderModule.kt.
+    b.includes("available bal") ||
+    b.includes("balance after") ||
     b.includes("declined") ||
     b.includes("txn failed") || b.includes("transaction failed") || b.includes("payment failed") ||
     b.includes("txn rs.") || b.includes("has been used for") || b.includes("has been charged") ||

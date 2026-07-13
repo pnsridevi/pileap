@@ -73,6 +73,108 @@
  *         a payment instrument, not a spending category. Merchant at POS
  *         determines category (same as any UPI/card spend). If taxonomy
  *         matches → categorize; else → pending_review.
+ *
+ *   ── This pass (categorization coverage review) ─────────────────────────
+ *   [FIX, THEN REVERTED — see next entry] needsReview (Layer 2 branch)
+ *         briefly also required review when classify() returned null.
+ *         Live-sync analysis found 217/259 parsed transactions had no
+ *         category, most of those (177) still landing as status:'approved'.
+ *         Reasoning at the time: an "approved" transaction with no category
+ *         is what the review queue exists to catch. In practice this
+ *         conflated "the facts might be wrong" (worth blocking on) with
+ *         "we just have no category for it" (not a correctness issue,
+ *         especially for P2P transfers, which structurally can never get a
+ *         category from text). Shipping this put ~217/263 transactions in
+ *         the review queue on the next real sync — an unusable amount of
+ *         friction for something that wasn't actually broken. Reverted
+ *         below.
+ *   [REVERTED] The above is reverted — needsReview (Layer 2 branch) is back
+ *         to its original three conditions (missing account, amount>=5000,
+ *         l2.requires_classification). Missing category no longer forces
+ *         pending_review on its own. The NACH-fallback classify() addition
+ *         (see further down this log) still forces review for ITS specific
+ *         low-confidence guess via isUnconfidentNachGuess — that one is a
+ *         genuine guess worth double-checking, unlike a bare missing
+ *         category. Category coverage is still meant to be visible to the
+ *         user — via a lightweight "no category" tap-to-tag affordance on
+ *         approved rows in the Transactions tab UI, not via the review gate.
+ *   [FIX] Healthcare > Pharmacy — added \bmedicals?\b. "GANESH MEDICALS",
+ *         "SHREE MEDICALS" etc. are extremely common Indian pharmacy-naming
+ *         convention and only had \bpharmacy\b to match against.
+ *   [ADD] Travel > General Travel — added generic \btravels?\b pattern.
+ *         Local travel agencies (e.g. "SETHUMEENA TRAVELS") don't match any
+ *         airline/OTA brand name and had nowhere to land.
+ *   [FIX — REGRESSION] Telecom Mobile Recharge (jio/airtel) — the earlier
+ *         fix that required a qualifying word after the brand name
+ *         (recharge/prepaid/bill/etc.) over-corrected: real recharge SMS to
+ *         a bare merchant name "JIO" or "airtel" (no qualifying word in the
+ *         text at all — this is the common case, not the exception) no
+ *         longer matched anything. Restored bare \bjio\b / \bairtel\b, but
+ *         kept the false-positive fix via negative lookahead instead of a
+ *         required suffix: excludes mart/saavn/cinema/hotstar/fiber for Jio
+ *         and xstream/payments bank/thanks/fiber for Airtel. This preserves
+ *         recall on the ordinary case while still keeping JioMart, Airtel
+ *         Xstream, etc. out of Mobile Recharge. Fiber is excluded from both
+ *         so "Jio Fiber"/"Airtel Fiber" fall through to the Broadband entry
+ *         (which sits later in the array) instead of tying with/beating it.
+ *   [ADD] NACH-channel fallback — classify() now accepts an optional channel
+ *         param. When channel === 'NACH' and no text pattern matched
+ *         anything, this returns a generic Liability > Recurring Payment >
+ *         NACH Mandate classification rather than leaving category fully
+ *         null. This does NOT mark the row auto-approved — the new
+ *         !classification-forces-review rule above still doesn't apply here
+ *         since a classification IS returned, so this is deliberately paired
+ *         with requires_classification being forced true for this specific
+ *         path (see parseSingleSms) so the user still confirms/reclassifies
+ *         once — after which the custom-category checkbox (once wired) will
+ *         apply their choice to all future NACH debits from that merchant_key.
+ *         Rationale: arch doc's DEFINITIONAL_CONTRA_RULES (transactions.ts)
+ *         already expects a GENERIC_PPF_SSY-style rule from Layer 2 for
+ *         mandate transfers with no real counter-leg; this taxonomy fallback
+ *         is a safety net for NACH debits that reach here without Layer 2
+ *         having classified them (e.g. "INDIAN CLEARING CORP LTD" — 20 of
+ *         259 transactions in one 90-day sample, all previously uncategorized).
+ *   [ADD] New categories/sub-categories (all generic keyword patterns unless
+ *         noted otherwise; P2P transfers to named individuals, donations, and
+ *         domestic-help wages are deliberately NOT addressed here — no text
+ *         signal distinguishes them from any other payment to a person, and
+ *         per product decision these stay uncategorized for the user to tag
+ *         via custom categories):
+ *           - Utilities > Water
+ *           - Utilities > DTH & Cable TV
+ *           - Utilities > Broadband — generalized beyond Jio Fiber/Airtel
+ *             Fiber to any ISP (ACT, Hathway, Excitel, BSNL, generic
+ *             wifi/internet bill)
+ *           - Utilities > Piped Gas (PNG)
+ *           - Rent & Housing > Maintenance & Society Charges (RWA/society
+ *             maintenance — housing-adjacent, filed under Rent & Housing
+ *             rather than Utilities)
+ *           - Food & Dining > Milk & Dairy
+ *           - Household > Newspaper & Magazine (new top-level category)
+ *           - Household > Home Services (pest control, plumber, electrician,
+ *             appliance repair, RO/water-purifier service)
+ *           - Household > Stationery
+ *           - Transportation > Parking
+ *           - Transportation > Vehicle Service & Repair (motors, garage,
+ *             workshop)
+ *           - Investment > Insurance > Motor Insurance
+ *           - Investment > Gold
+ *           - Asset > Government Schemes > PPF/SSY
+ *           - Courier & Postal (new top-level category)
+ *           - Taxes & Government (new top-level category — income tax, GST,
+ *             property tax, TDS, traffic challan)
+ *           - Subscriptions (new top-level category) — NOTE: unlike every
+ *             other addition in this pass, this is a CURATED LIST of named
+ *             SaaS/digital-service products (Spotify, Google One, Anthropic,
+ *             OpenAI, Microsoft 365, etc.), not a generic keyword pattern.
+ *             There is no generic word that reliably signals "this is a
+ *             subscription" without false-positiving on ordinary business
+ *             names (e.g. bare "sub" matches "Subhash Stores"). This list
+ *             will need periodic manual additions as new services appear —
+ *             flagging explicitly so this isn't mistaken for a
+ *             self-maintaining pattern the way the rest of this file is.
+ *           - Personal Care (salon, spa, parlour, Urban Company)
+ *           - Fitness & Gym
  */
 
 // Layer 2 — require() because it is a CommonJS .js file
@@ -96,6 +198,7 @@ export interface RawMessage {
 // ─── Output type (maps to transactions table, arch 5.3.6) ────────────────────
 
 export interface ParsedTransaction {
+  kind:                  'transaction';
   raw_sms_id:            string;
   txn_date:              string;        // YYYY-MM-DD
   amount:                number | null; // signed: positive=credit, negative=debit
@@ -119,7 +222,7 @@ export interface ParsedTransaction {
 
   // Ref number (arch 5.3.6 v3.1)
   ref_number:            string | null;
-  ref_type:              'upi_rrn' | 'neft_utr' | 'unknown' | null;
+  ref_type:               'upi_rrn' | 'neft_utr' | 'unknown' | null;
 
   // Layer 2 metadata
   matched_rule:          string | null;
@@ -137,6 +240,28 @@ export interface ParsedTransaction {
 
   // Raw — AES-256 encrypt before INSERT (arch 11.2)
   raw_text:              string;
+}
+
+// [ADD] BalanceUpdate — returned instead of a ParsedTransaction when a
+// message is a pure balance-disclosure with no money movement (see
+// BALANCE_ALERT_ONLY in ruleset.js). Never inserted into `transactions` and
+// never routed to pending_review — the caller should look this up/create in
+// `accounts` (matched on account_number_masked + bank, scoped to user_id)
+// and update balance_latest + balance_updated_at ONLY if message_date is
+// newer than what's currently stored, per the "newest date wins" rule.
+export interface BalanceUpdate {
+  kind:                   'balance_update';
+  raw_sms_id:             string;
+  account_number_masked:  string | null;
+  bank:                   string | null;
+  balance:                number | null;
+  message_date:           string;        // YYYY-MM-DD
+}
+
+export function isBalanceUpdate(
+  item: ParsedTransaction | BalanceUpdate
+): item is BalanceUpdate {
+  return item.kind === 'balance_update';
 }
 
 export type TxnType = 'Expense' | 'Income' | 'Investment' | 'Liability' | 'Asset';
@@ -240,6 +365,12 @@ const CHANNEL_MAP: Record<string, string> = {
 // Entries that share keywords with broader categories must come FIRST.
 // Example: OTT (amazon prime) must be above Shopping (amazon) so that
 // "Amazon Prime" resolves to OTT and not Shopping.
+//
+// Convention (kept consistent across every entry, including new ones added
+// in this pass): multi-word patterns always use \s+ between words (never a
+// literal space, since real SMS text varies — double spaces, tabs from
+// template padding, etc. are common), and every pattern carries the /i flag.
+// Case-sensitive or rigid-space patterns are treated as bugs in this file.
 
 interface TaxonomyEntry {
   type:         TxnType;
@@ -283,6 +414,17 @@ const TAXONOMY: TaxonomyEntry[] = [
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Groceries',
     patterns: [/\bbigbasket\b/i, /\bd[\s-]?mart\b/i, /\breliance\s+(fresh|smart)\b/i,
                /\bsupermarket\b/i, /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
+
+  // [ADD — this pass] Milk & Dairy. Deliberately its own sub_category
+  // rather than folded into Groceries — recurring daily/monthly milk-booth
+  // debits have a very different spending pattern than one-off grocery
+  // runs, and keeping them separate makes any future spend-trend feature
+  // more useful. \bmilk\b alone is broad (could theoretically false-positive
+  // on an unrelated merchant name containing "milk"), but the false-positive
+  // cost here is low and the false-negative cost of requiring more context
+  // is high — most milk-booth SMS are terse.
+  { type: 'Expense', category: 'Food & Dining', sub_category: 'Milk & Dairy',
+    patterns: [/\bmilk\b/i, /\bdairy\b/i, /\bmilk\s+booth\b/i] },
 
   // ── Entertainment — OTT MUST be above Shopping ────────────────────────────
   // [FIX] Moved OTT block above Shopping to fix Amazon Prime tie-break.
@@ -330,6 +472,23 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\bautope\b/i,
     ] },
 
+  // [ADD — this pass] Transportation > Parking. Evidenced directly in live
+  // data ("EXPRESS AVENUE PARKING", "CMRL GOVERNMENT ESTATE PA" — the
+  // latter almost certainly a metro-station parking area abbreviation).
+  { type: 'Expense', category: 'Transportation', sub_category: 'Parking',
+    patterns: [/\bparking\b/i] },
+
+  // [ADD — this pass] Transportation > Vehicle Service & Repair. Evidenced
+  // directly in live data ("HARDEEP MOTORS"). \bmotors?\b is broad (many
+  // Indian vehicle dealers/service centres use "Motors" in their name) —
+  // accepted tradeoff since a false positive here just means a vehicle
+  // -adjacent spend gets a vehicle-adjacent category, low real-world cost.
+  { type: 'Expense', category: 'Transportation', sub_category: 'Vehicle Service & Repair',
+    patterns: [
+      /\bmotors?\b/i, /\bgarage\b/i, /\bworkshop\b/i,
+      /\bcar\s+service\b/i, /\bbike\s+service\b/i, /\bauto\s*mobile\b/i,
+    ] },
+
   // ── Utilities ─────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Utilities', sub_category: 'Electricity',
     patterns: [/\bescom\b/i, /\bmseb\b/i, /\bbescom\b/i, /\btata\s+power\b/i,
@@ -338,28 +497,70 @@ const TAXONOMY: TaxonomyEntry[] = [
   { type: 'Expense', category: 'Utilities', sub_category: 'Gas',
     patterns: [/\bgas\s+(bill|payment)\b/i, /\bindane\b/i, /\bbharat\s+gas\b/i, /\bhp\s+gas\b/i] },
 
+  // [ADD — this pass] Utilities > Piped Gas (PNG). Kept distinct from
+  // cylinder Gas above — billing pattern (metered, monthly) differs from
+  // cylinder refills. Bare \bpng\b intentionally excluded (too short, risks
+  // matching unrelated 3-letter occurrences); requires accompanying context.
+  { type: 'Expense', category: 'Utilities', sub_category: 'Piped Gas',
+    patterns: [
+      /\bpiped\s+gas\b/i, /\bpng\s+bill\b/i,
+      /\bmahanagar\s+gas\b/i, /\bindraprastha\s+gas\b/i,
+    ] },
+
+  // [ADD — this pass] Utilities > Water.
+  { type: 'Expense', category: 'Utilities', sub_category: 'Water',
+    patterns: [
+      /\bwater\s+(bill|tax|tanker|board|supply|charge)\b/i,
+      /\bbwssb\b/i, /\bhmwssb\b/i, /\bjal\s+board\b/i,
+    ] },
+
+  // [ADD — this pass] Utilities > DTH & Cable TV. No prior category existed
+  // for this at all.
+  { type: 'Expense', category: 'Utilities', sub_category: 'DTH & Cable TV',
+    patterns: [
+      /\btata\s*sky\b/i, /\bd2h\b/i, /\bdish\s*tv\b/i,
+      /\bsun\s+direct\b/i, /\bdth\s+recharge\b/i, /\bcable\s+tv\b/i,
+    ] },
+
   // ── Telecom ───────────────────────────────────────────────────────────────
-  // [FIX] Expanded Jio and Airtel patterns.
-  // Problem: standalone \bjio\b fired on JioMart, JioSaavn, JioCinema.
-  // Problem: standalone \bairtel\b fired on Airtel Xstream Play, Airtel Payments Bank.
-  // Fix: require a qualifying word after brand name OR use full brand name.
+  // [FIX — REGRESSION, this pass] Jio and Airtel Mobile Recharge patterns.
+  // Previous fix required a qualifying word after the brand name to avoid
+  // matching JioMart/JioSaavn/Airtel Xstream/Airtel Payments Bank — but that
+  // also broke the ordinary case: a real recharge SMS to bare merchant "JIO"
+  // or "airtel" (no qualifying word present anywhere in the text) stopped
+  // matching entirely. Restored bare brand-name matching, using a negative
+  // lookahead to exclude the known false-positive suffixes instead of
+  // requiring a suffix. "fiber" is excluded from both here so Jio
+  // Fiber/Airtel Fiber fall through to the Broadband entry below instead of
+  // tying with (and, by array order, losing to) this entry.
   { type: 'Expense', category: 'Telecom', sub_category: 'Mobile Recharge',
     patterns: [
-      /\bjio\s*(recharge|prepaid|postpaid|bill|mobile|sim|plan|pack)\b/i,
+      /\bjio\b(?!\s*(mart|saavn|cinema|hotstar|fiber))/i,
       /\breliance\s+jio\b/i,
-      /\bairtel\s*(recharge|prepaid|postpaid|bill|mobile|sim|plan|pack|fiber)\b/i,
+      /\bairtel\b(?!\s*(xstream|payments\s*bank|thanks|fiber))/i,
       /\bbharti\s+airtel\b/i,
       /\bmobile\s+(recharge|topup)\b/i,
       /\btalktime\b/i,
     ] },
 
-  { type: 'Expense', category: 'Telecom', sub_category: 'Broadband',
-    patterns: [/\bjio\s+fiber\b/i, /\bairtel\s+fiber\b/i, /\bbroadband\s+(bill|payment)\b/i] },
+  // [FIX — this pass] Broadband generalized beyond Jio Fiber/Airtel Fiber —
+  // any ISP debit was previously falling through entirely. Also added
+  // generic wifi/internet bill patterns for ISPs not explicitly named.
+  { type: 'Expense', category: 'Utilities', sub_category: 'Broadband',
+    patterns: [
+      /\bjio\s+fiber\b/i, /\bairtel\s+fiber\b/i,
+      /\bact\s+fibernet\b/i, /\bhathway\b/i, /\bexcitel\b/i, /\bbsnl\s+broadband\b/i,
+      /\bbroadband\s+(bill|payment)\b/i, /\bwifi\s+(bill|recharge)\b/i,
+      /\binternet\s+(bill|recharge)\b/i,
+    ] },
 
   // ── Healthcare ────────────────────────────────────────────────────────────
+  // [FIX — this pass] Added \bmedicals?\b — "GANESH MEDICALS" and similar
+  // (extremely common Indian pharmacy-naming convention) only had
+  // \bpharmacy\b to match against before this.
   { type: 'Expense', category: 'Healthcare', sub_category: 'Pharmacy',
     patterns: [/\bapollo\s+pharmacy\b/i, /\bmedplus\b/i, /\bnetmeds\b/i,
-               /\bpharmeasy\b/i, /\b1mg\b/i, /\bpharmacy\b/i] },
+               /\bpharmeasy\b/i, /\b1mg\b/i, /\bpharmacy\b/i, /\bmedicals?\b/i] },
 
   { type: 'Expense', category: 'Healthcare', sub_category: 'Hospital & Clinic',
     patterns: [/\bhospital\b/i, /\bclinic\b/i, /\bfortis\b/i,
@@ -402,10 +603,29 @@ const TAXONOMY: TaxonomyEntry[] = [
     ],
     minAmount: 500 },
 
+  // [ADD — this pass] Travel > General Travel. Local travel agencies (e.g.
+  // "SETHUMEENA TRAVELS" in live data) don't match any airline/OTA brand
+  // name above and had nowhere to land. Placed after the more specific
+  // Flight/Accommodation entries so brand-specific matches still win ties
+  // when a merchant name happens to contain both.
+  { type: 'Expense', category: 'Travel', sub_category: 'General Travel',
+    patterns: [/\btravels?\b/i] },
+
   // ── Rent & Housing ────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Rent & Housing', sub_category: 'House Rent',
     patterns: [/\bhouse\s+rent\b/i, /\bflat\s+rent\b/i,
                /\brent\s+(payment|paid|transfer)\b/i, /\bmonthly\s+rent\b/i] },
+
+  // [ADD — this pass] Rent & Housing > Maintenance & Society Charges (RWA).
+  // \brwa\b alone is a risky bare 3-letter match, so it's required to
+  // appear with a qualifying word; the other patterns are specific enough
+  // to stand alone.
+  { type: 'Expense', category: 'Rent & Housing', sub_category: 'Maintenance & Society Charges',
+    patterns: [
+      /\bmaintenance\s+(charge|fee|bill)\b/i, /\bsociety\s+maintenance\b/i,
+      /\bapartment\s+maintenance\b/i, /\bflat\s+maintenance\b/i,
+      /\brwa\s+(maintenance|charge|fee)\b/i,
+    ] },
 
   // ── Finance Charges ───────────────────────────────────────────────────────
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Cash Withdrawal',
@@ -414,6 +634,59 @@ const TAXONOMY: TaxonomyEntry[] = [
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Bank Charges',
     patterns: [/\bservice\s+charge\b/i, /\bannual\s+(fee|charge)\b/i,
                /\bpenalty\b/i, /\blate\s+payment\s+fee\b/i] },
+
+  // ── Household (new category, this pass) ───────────────────────────────────
+  { type: 'Expense', category: 'Household', sub_category: 'Newspaper & Magazine',
+    patterns: [/\bnewspaper\b/i, /\bmagazine\s+subscription\b/i, /\bnews\s+agency\b/i] },
+
+  // Pest control, plumber, electrician, appliance repair, RO/water-purifier
+  // service — generic keyword signals, none existed anywhere before this.
+  { type: 'Expense', category: 'Household', sub_category: 'Home Services',
+    patterns: [
+      /\bpest\s+control\b/i, /\bplumber\b/i, /\belectrician\b/i,
+      /\bappliance\s+repair\b/i, /\bro\s+service\b/i, /\bwater\s+purifier\s+service\b/i,
+      /\burban\s*company\b/i,
+    ] },
+
+  { type: 'Expense', category: 'Household', sub_category: 'Stationery',
+    patterns: [/\bstationers?\b/i, /\bstationery\b/i] },
+
+  // ── Personal Care & Fitness (new categories, this pass) ───────────────────
+  { type: 'Expense', category: 'Personal Care', sub_category: null,
+    patterns: [/\bsalon\b/i, /\bspa\b/i, /\bparlour\b/i, /\bbarber\b/i] },
+
+  { type: 'Expense', category: 'Fitness & Gym', sub_category: null,
+    patterns: [/\bgym\b/i, /\bfitness\b/i, /\bcult\.?fit\b/i, /\byoga\s+class\b/i] },
+
+  // ── Courier & Postal (new category, this pass) ────────────────────────────
+  { type: 'Expense', category: 'Courier & Postal', sub_category: null,
+    patterns: [
+      /\bdtdc\b/i, /\bblue\s*dart\b/i, /\bindia\s+post\b/i,
+      /\bdelhivery\b/i, /\bekart\b/i, /\bxpressbees\b/i,
+    ] },
+
+  // ── Taxes & Government (new category, this pass) ──────────────────────────
+  // \btds\b bare is short but the surrounding banking-SMS context makes
+  // false positives unlikely in practice.
+  { type: 'Expense', category: 'Taxes & Government', sub_category: null,
+    patterns: [
+      /\bincome\s+tax\b/i, /\bgst\s+payment\b/i, /\bproperty\s+tax\b/i,
+      /\bmunicipal\s+tax\b/i, /\btraffic\s+challan\b/i, /\be-?challan\b/i,
+      /\btds\b/i,
+    ] },
+
+  // ── Subscriptions (new category, this pass) ───────────────────────────────
+  // CURATED LIST — see change-log note at top of file. Unlike every other
+  // entry in this taxonomy, there is no generic keyword that means
+  // "subscription" without false-positiving on ordinary business names.
+  // This list needs periodic manual maintenance as new services appear.
+  { type: 'Expense', category: 'Subscriptions', sub_category: null,
+    patterns: [
+      /\bspotify\b/i, /\byoutube\s+premium\b/i, /\bapple\s+(music|one|icloud)\b/i,
+      /\bmicrosoft\s*365\b/i, /\bgoogle\s+(one|workspace|storage)\b/i,
+      /\banthropic\b/i, /\bclaude\b/i, /\bopenai\b/i, /\bchatgpt\b/i,
+      /\bcanva\b/i, /\bdropbox\b/i, /\bnotion\b/i, /\baws\b/i,
+    ] },
 
   // ── Income ────────────────────────────────────────────────────────────────
   { type: 'Income', category: 'Salary', sub_category: 'Monthly Salary',
@@ -456,6 +729,13 @@ const TAXONOMY: TaxonomyEntry[] = [
     patterns: [/\bzerodha\b/i, /\bgroww\b/i, /\bupstox\b/i,
                /\bangelone\b/i, /\bangel\s+one\b/i, /\bdhan\b/i] },
 
+  // [ADD — this pass] Investment > Gold.
+  { type: 'Investment', category: 'Gold', sub_category: null,
+    patterns: [
+      /\bsafegold\b/i, /\bdigital\s+gold\b/i, /\bpaytm\s+gold\b/i,
+      /\bsovereign\s+gold\s+bond\b/i, /\bgold\s+bond\b/i,
+    ] },
+
   // [FIX] Removed \bbajaj\s+finserv\b — Bajaj Finserv is primarily EMI/lending.
   // Bajaj Allianz kept (insurance-only entity, unambiguous).
   // [ADD] shriramlife — Shriram Life Insurance.
@@ -476,6 +756,15 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\bmanipal\s*cigna\b/i, /\bmanipalcigna\b/i,
     ] },
 
+  // [ADD — this pass] Investment > Insurance > Motor Insurance. No prior
+  // category existed for vehicle insurance at all.
+  { type: 'Investment', category: 'Insurance', sub_category: 'Motor Insurance',
+    patterns: [
+      /\bmotor\s+insurance\b/i, /\bvehicle\s+insurance\b/i,
+      /\bcar\s+insurance\b/i, /\bbike\s+insurance\b/i,
+      /\bicici\s+lombard\b/i, /\bhdfc\s+ergo\b/i, /\bbajaj\s+allianz\s+general\b/i,
+    ] },
+
   // ── Liability ─────────────────────────────────────────────────────────────
   { type: 'Liability', category: 'EMI', sub_category: 'Loan EMI',
     patterns: [/\bemi\s+(deducted|debited|paid)\b/i, /\bloan\s+emi\b/i,
@@ -493,6 +782,22 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   { type: 'Asset', category: 'Government Schemes', sub_category: 'NPS',
     patterns: [/\bnps\b/i, /\bnational\s+pension\s+(scheme|system)\b/i] },
+
+  // [ADD — this pass] Asset > Government Schemes > PPF/SSY. Filed under
+  // Asset to match the existing NPS entry's type — flagging that NPS (Asset)
+  // and SIP (Investment, above) currently sit under different top-level
+  // `type`s despite being similar long-term-savings instruments; not
+  // changed here since it wasn't clear whether that split is intentional.
+  // Also acts as a safety net for transactions.ts's DEFINITIONAL_CONTRA_RULES
+  // (GENERIC_PPF_SSY), which currently has no Layer-2 rule feeding it that
+  // we can see from this file — if Layer 2 never sets matched_rule to
+  // GENERIC_PPF_SSY, this at least gets the transaction categorized instead
+  // of falling through uncategorized.
+  { type: 'Asset', category: 'Government Schemes', sub_category: 'PPF/SSY',
+    patterns: [
+      /\bppf\b/i, /\bpublic\s+provident\s+fund\b/i,
+      /\bsukanya\s+samriddhi\b/i, /\bssy\b/i,
+    ] },
 ];
 
 // ─── merchant_key normaliser ──────────────────────────────────────────────────
@@ -513,13 +818,15 @@ function normaliseMerchantKey(merchant: string | null): string | null {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function parseSmsMessages(messages: RawMessage[]): ParsedTransaction[] {
+export function parseSmsMessages(
+  messages: RawMessage[]
+): (ParsedTransaction | BalanceUpdate)[] {
   return messages.map(msg => parseSingleSms(msg));
 }
 
 // ─── Single message orchestrator ─────────────────────────────────────────────
 
-function parseSingleSms(msg: RawMessage): ParsedTransaction {
+function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
   const body    = msg.body;
   const isInfra = UPI_INFRA_SENDERS.some(s => msg.address.toUpperCase().includes(s));
   const msgDate = new Date(msg.date).toISOString().split('T')[0];
@@ -528,25 +835,64 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
   const l2 = matchMessage(body, msgDate);
 
   if (l2 && l2.discard) {
-    return buildDiscarded(msg, msgDate, isInfra, 'declined_transaction');
+    // [ADD] Pure balance-disclosure SMS — never a transaction. Return a
+    // distinct BalanceUpdate so the caller updates accounts.balance_latest
+    // directly and never inserts into transactions or pending_review.
+    if (l2.reason === 'balance_disclosure_no_transaction') {
+      return {
+        kind:                   'balance_update',
+        raw_sms_id:             msg.id,
+        account_number_masked:  l2.account_number_masked,
+        bank:                   l2.bank,
+        balance:                l2.balance,
+        message_date:           msgDate,
+      };
+    }
+    // [FIX] Was hardcoded to 'declined_transaction' regardless of the actual
+    // reason — cc_emi_conversion_not_new_txn discards were being mislabeled.
+    return buildDiscarded(msg, msgDate, isInfra, l2.reason);
   }
 
   if (l2 && !l2.discard) {
     const isCredit = l2.direction === 'credit';
     const classification = l2.suggested_category
       ? parseSuggestedCategory(l2.suggested_category)
-      : classify(body.toLowerCase(), isCredit, l2.amount);
+      : classify(body.toLowerCase(), isCredit, l2.amount, l2.channel);
 
     const signedAmount = isCredit ? Math.abs(l2.amount) : -Math.abs(l2.amount);
 
-    // [FIX] Added || l2.requires_classification — person VPA credits were
-    // auto-approved. They need user confirmation of what the payment was for.
+    // [REVERTED — see change log] A prior pass added `|| !classification`
+    // here, forcing review on every transaction with no category at all.
+    // That conflated two different questions: "is this transaction's facts
+    // (amount/account/direction) possibly wrong?" — worth blocking on — vs.
+    // "do we just not have a category label for it?" — not a correctness
+    // risk, especially for the large P2P bucket (payments to named
+    // individuals) where no category will ever be derivable from text
+    // alone. Forcing review on missing-category alone put ~217 of 263
+    // transactions in the queue in practice, most of them P2P transfers
+    // with nothing actually wrong. Reverted to the original three
+    // conditions. Missing category is still visible and actionable — the
+    // Transactions tab can surface "no category" as a lightweight
+    // tap-to-tag affordance on approved rows (category IS NULL is a trivial
+    // filter) — without gating the transaction's approval on it.
     const needsReview =
       !l2.account_number_masked   ||
       Math.abs(l2.amount) >= 5000 ||
       l2.requires_classification;
 
+    // [ADD — this pass] NACH-channel classify() fallback (see below) returns
+    // a generic "Recurring Payment > NACH Mandate" classification instead of
+    // null so the row isn't left fully uncategorized — but it's still a
+    // guess, not a confident match, so it must still route to pending_review
+    // regardless of the `!classification` check above (which would no
+    // longer fire since classification is non-null here). forcedReview
+    // covers that case explicitly.
+    const isUnconfidentNachGuess =
+      classification?.category === 'Recurring Payment' &&
+      classification?.sub_category === 'NACH Mandate';
+
     return {
+      kind:                   'transaction',
       raw_sms_id:             msg.id,
       txn_date:               l2.txn_date || msgDate,
       amount:                 signedAmount,
@@ -556,7 +902,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
       merchant:               l2.merchant,
       merchant_key:           normaliseMerchantKey(l2.merchant),
       source:                 'sms',
-      status:                 needsReview ? 'pending_review' : 'approved',
+      status:                 (needsReview || isUnconfidentNachGuess) ? 'pending_review' : 'approved',
       account_number_masked:  l2.account_number_masked,
       bank:                   l2.bank,
       channel:                l2.channel,
@@ -565,7 +911,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
       ref_type:               l2.ref_type,
       matched_rule:           l2.matched_rule,
       confidence:             l2.confidence,
-      requires_classification: l2.requires_classification,
+      requires_classification: l2.requires_classification || isUnconfidentNachGuess,
       possible_contra:        l2.possible_contra,
       txn_group_id:           null,
       is_infrastructure:      isInfra,
@@ -585,7 +931,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
   }
 
-  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount);
+  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel);
 
   if (!classification) {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
@@ -600,6 +946,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
     Math.abs(extracted.amount) >= 5000;
 
   return {
+    kind:                   'transaction',
     raw_sms_id:             msg.id,
     txn_date:               msgDate,
     amount:                 signedAmount,
@@ -614,17 +961,17 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction {
     bank:                   extracted.bank,
     channel:                extracted.channel,
     balance:                extracted.balance,
-    ref_number:             extracted.ref_number,
-    ref_type:               extracted.ref_type,
-    matched_rule:           null,
-    confidence:             0.7,
+    ref_number:              extracted.ref_number,
+    ref_type:                extracted.ref_type,
+    matched_rule:            null,
+    confidence:              0.7,
     requires_classification: false,
-    possible_contra:        false,
-    txn_group_id:           null,
-    is_infrastructure:      isInfra,
-    health_module_tag:      null,
-    parse_failure:          null,
-    raw_text:               body,
+    possible_contra:         false,
+    txn_group_id:            null,
+    is_infrastructure:       isInfra,
+    health_module_tag:       null,
+    parse_failure:           null,
+    raw_text:                body,
   };
 }
 
@@ -637,6 +984,7 @@ function buildDiscarded(
   reason: string,
 ): ParsedTransaction {
   return {
+    kind: 'transaction',
     raw_sms_id: msg.id, txn_date: msgDate, amount: null,
     type: null, category: null, sub_category: null,
     merchant: null, merchant_key: null,
@@ -666,6 +1014,7 @@ function buildEscalated(
         : -Math.abs(extracted.amount);
 
   return {
+    kind: 'transaction',
     raw_sms_id: msg.id, txn_date: msgDate,
     amount: signedAmount,
     type: null, category: null, sub_category: null,
@@ -823,10 +1172,16 @@ function extractRefNumber(body: string): Pick<ExtractedFields, 'ref_number' | 'r
 
 // ─── Taxonomy classifier ──────────────────────────────────────────────────────
 
+// [FIX — this pass] Added optional `channel` param, used only for the NACH
+// fallback below. Every existing call site is updated to pass it through
+// (l2.channel or extracted.channel) — behaviour for every other message is
+// unchanged, since the fallback only triggers when channel === 'NACH' AND
+// no text pattern matched anything.
 function classify(
   bodyLower: string,
   isCredit: boolean,
   amount: number,
+  channel?: string | null,
 ): Classification | null {
   const direction = isCredit ? 'credit' : 'debit';
   let bestEntry: TaxonomyEntry | null = null;
@@ -840,12 +1195,33 @@ function classify(
     if (score > bestScore) { bestScore = score; bestEntry = entry; }
   }
 
-  if (!bestEntry) return null;
-  return {
-    type:         bestEntry.type,
-    category:     bestEntry.category,
-    sub_category: bestEntry.sub_category,
-  };
+  if (bestEntry) {
+    return {
+      type:         bestEntry.type,
+      category:     bestEntry.category,
+      sub_category: bestEntry.sub_category,
+    };
+  }
+
+  // [ADD — this pass] NACH fallback. No text pattern matched anything, but
+  // Layer 2 (or extractFields()) already told us this is a NACH mandate
+  // debit — a real, recurring, non-P2P payment to a registered entity
+  // (typically a clearing house acting on behalf of a SIP/insurance/EMI
+  // mandate; live data showed "INDIAN CLEARING CORP LTD" as 100% of NACH
+  // matches, 20 of 259 transactions in one 90-day sample, all previously
+  // uncategorized). Rather than leave this fully blank, return a generic
+  // label — the caller (parseSingleSms) still forces pending_review for
+  // this specific classification via isUnconfidentNachGuess, so this is a
+  // helpful default label, not a confident auto-approval.
+  if (!isCredit && channel === 'NACH') {
+    return {
+      type:         'Liability',
+      category:     'Recurring Payment',
+      sub_category: 'NACH Mandate',
+    };
+  }
+
+  return null;
 }
 
 function parseSuggestedCategory(suggested: string): Classification | null {

@@ -24,6 +24,8 @@
       "package": "com.pileap.app",
       "permissions": [
         "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS"
       ]
     },
@@ -38,6 +40,12 @@
         "projectId": "66797a5f-4add-47f4-943f-fe6b5dd41061"
       }
     },
-    "owner": "sridevi123"
+    "owner": "sridevi123",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/66797a5f-4add-47f4-943f-fe6b5dd41061"
+    }
   }
 }

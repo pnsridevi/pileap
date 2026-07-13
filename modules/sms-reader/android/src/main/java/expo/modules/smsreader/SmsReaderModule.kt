@@ -75,6 +75,23 @@ import expo.modules.kotlin.exception.CodedException
 //   - Step 7 service noise expanded: cc_statement, booking_confirmation,
 //     trade_summary, insurance_claim_status, pf_contribution_notice,
 //     payment_pending_nudge
+//   - [FIX] hasDirectionSignal only checked b.contains("avl bal") — the
+//     abbreviated form used in per-transaction "Avl Bal Rs.X" disclosures.
+//     It did NOT match "Available Bal", the spelled-out form banks use in
+//     recurring daily/EOD balance broadcasts (e.g. "Available Bal in HDFC
+//     Bank A/c XX2875 as on yesterday:01-APR-26 is INR 27,51,128.12.").
+//     These broadcasts were being dropped entirely as no_signal — on days
+//     with no other balance-bearing transaction, this was the ONLY source
+//     of balance data for the account, so it was lost permanently, not just
+//     miscategorized downstream. Confirmed on a real 90-180 day device
+//     export: 75 of 633 messages (11.8%) matched this exact pattern and
+//     were all being dropped before this fix. Added "available bal" as an
+//     additional direction signal alongside the existing "avl bal" check.
+//     These messages are still not transactions — Layer 2's
+//     BALANCE_ALERT_ONLY rule (ruleset.js) is what routes them to an
+//     accounts.balance_latest update instead of pending_review once they
+//     reach it. This fix only ensures they aren't discarded before they
+//     get that far.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SmsReaderModule : Module() {
@@ -479,7 +496,21 @@ class SmsReaderModule : Module() {
       b.contains("txn alert")          || b.contains("transaction alert") ||
       b.contains("purchase of")        || b.contains("payment received")  ||
       b.contains("amount debited")     || b.contains("amount credited")   ||
-      b.contains("avl bal")            || b.contains("balance after")     ||
+      b.contains("avl bal")            ||
+      // [FIX] "avl bal" only matches the abbreviated per-transaction form
+      // ("Avl Bal Rs.X"). It never matched the spelled-out form used in
+      // recurring daily/EOD balance broadcasts: "Available Bal in HDFC Bank
+      // A/c XX2875 as on yesterday:01-APR-26 is INR 27,51,128.12." On days
+      // with no other balance-bearing transaction SMS, this broadcast was
+      // the ONLY source of balance data for the account — and it was being
+      // dropped entirely (no_signal), not merely miscategorized downstream.
+      // Confirmed on a real 90-180 day device export: 75/633 messages
+      // (11.8%) matched this exact pattern, 0 of them passing before this
+      // fix. These are still not transactions — see BALANCE_ALERT_ONLY in
+      // ruleset.js for how Layer 2 routes them to an accounts.balance_latest
+      // update instead of pending_review once they reach it.
+      b.contains("available bal")      ||
+      b.contains("balance after")      ||
       b.contains("declined")           ||
       // 'failed' tightened to transaction-specific forms only.
       // Bare 'failed' catches "KYC failed", "biometric auth failed" etc.

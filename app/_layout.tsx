@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
+import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { colors } from '@/constants/theme';
 
@@ -8,17 +9,18 @@ export default function RootLayout() {
   const { isLoading, isLoggedIn, setSession } = useAuthStore();
 
   useEffect(() => {
-    // DEV MODE: no Supabase — just mark loading done
-    setSession(null);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (isLoading) return;
-    if (isLoggedIn) {
-      router.replace('/(app)/report-card');
-    } else {
-      router.replace('/(auth)/sign-in');
-    }
+    router.replace(isLoggedIn ? '/(app)/report-card' : '/(auth)/sign-in');
   }, [isLoading, isLoggedIn]);
 
   if (isLoading) {
@@ -31,8 +33,8 @@ export default function RootLayout() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)"     options={{ headerShown: false }} />
-      <Stack.Screen name="(app)"      options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      <Stack.Screen name="(app)" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
     </Stack>
   );

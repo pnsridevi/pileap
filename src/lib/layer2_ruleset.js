@@ -25,6 +25,12 @@
  *   - ADD: PLUXEE_SPEND — benefit card spend with merchant + channel from SMS.
  *   - ADD: PLUXEE_CREDIT — employer meal wallet credit, possible_contra:true.
  *   - ADD: NCMC_LOAD — transit card top-up, possible_contra:true.
+ *   - ADD: BALANCE_ALERT_ONLY — pure balance-disclosure / low-balance-warning
+ *     SMS carry no transaction at all. Previously fell through every rule and
+ *     were escalated as a failed 'unknown_direction' pending_review row.
+ *     Now discarded from the transactions pipeline entirely and routed as a
+ *     direct accounts.balance_latest update instead. See matchMessage() and
+ *     the rule itself below for details.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +203,14 @@ function extractAmount(body) {
 
   const sym = body.match(/₹\s*([\d,]+(?:\.\d{1,2})?)/);
   if (sym) { const v = parseFloat(sym[1].replace(/,/g, '')); if (v > 0) return v; }
+
+  // [FIX] Foreign-currency card spends (HDFC Forex/Regalia cards etc.) use
+  // "Paid USD X" / "Bal USD Y" with no Rs/INR/₹ anywhere in the message, so
+  // every one of these was silently dropped (amount always came back null).
+  // Confirmed on 28+ real messages in a single 90-day window (Singapore/Sri
+  // Lanka trip forex card spends). Must come before the final null return.
+  const fx = body.match(/\b(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\s+([\d,]+(?:\.\d{1,2})?)/i);
+  if (fx) { const v = parseFloat(fx[1].replace(/,/g, '')); if (v > 0) return v; }
 
   const bare = body.match(/transaction of\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (bare) { const v = parseFloat(bare[1].replace(/,/g, '')); if (v > 0) return v; }
@@ -550,6 +564,61 @@ const RULES = [
     },
   },
 
+  // ── 1c. BALANCE ALERT ONLY (no transaction occurred) ───────────────────────
+  // [ADD] Pure balance-disclosure / low-balance-warning SMS carry no money
+  // movement at all — e.g. "Your A/c XX4751 balance is low: Rs.96.10..." /
+  // "Alert: A/c XX5181 bal is Rs.4,801, below min required balance..." /
+  // "your available balance in A/c XX2335 is Rs.3,532." Confirmed via real
+  // samples in terminal_test_2250.json — these were previously falling
+  // through every transaction rule (no debit/credit keyword), then the
+  // taxonomy fallback flagged them as an escalated 'unknown_direction'
+  // pending_review row — treated as a FAILED transaction parse when there
+  // was never a transaction to parse. They should update accounts.balance_latest
+  // directly and never touch transactions or the review queue.
+  // Must come before GENERIC_DEBIT/GENERIC_CREDIT. Excludes any message that
+  // also carries a real transaction-movement keyword — a transaction SMS
+  // that happens to mention balance must still go through the normal rules.
+  {
+    id: 'BALANCE_ALERT_ONLY',
+    pattern: {
+      test(body) {
+        const hasBalancePhrase =
+          /\bbalance\s+is\s+low\b/i.test(body) ||
+          /\bbal\s+is\b.{0,20}\bbelow\b/i.test(body) ||
+          // [FIX] Was /\bavailable\s+balance\b.{0,30}\bis\b/i — missed the
+          // real, very common daily broadcast template "Available Bal in
+          // HDFC Bank A/c XX2875 as on yesterday:01-APR-26 is INR
+          // 27,51,128.12." Two problems: (1) banks abbreviate to "Bal", not
+          // always "Balance" — same gap as the Layer 1 Kotlin/layer1sim.js
+          // bug found separately; (2) the account/date clause between "Bal"
+          // and "is" runs ~50 chars, longer than the 30-char allowance.
+          // Confirmed against 75 real messages in a 90-180 day device
+          // export — 0/75 matched before this fix, 75/75 after.
+          /\bavailable\s+bal(?:ance)?\b.{0,80}\bis\b/i.test(body) ||
+          /\bminimum\s+balance\b/i.test(body);
+        if (!hasBalancePhrase) return false;
+
+        const hasTransactionSignal =
+          /\bdebited\b|\bcredited\b|\bdeducted\b|\bwithdrawn\b|\bwithdrawal\b|\bspent\b|\bpaid\b|\btransferred\b|\breceived\b|\brefunded\b|\bdisbursed\b|\bNEFT\b|\bIMPS\b|\bRTGS\b|\bUPI\b|\bEMI\b/i.test(body);
+
+        return !hasTransactionSignal;
+      }
+    },
+    extract(body, messageDate) {
+      return {
+        discard_reason:         'balance_disclosure_no_transaction',
+        account_number_masked:  extractAccount(body),
+        bank:                   extractBank(body),
+        // Pure balance-disclosure SMS carry exactly one Rs.X figure — the
+        // balance itself. extractAmount() is more reliable here than
+        // extractBalance(), whose "avl bal"/"available balance" patterns
+        // miss common real-world phrasing like "balance is low: Rs.X" or
+        // "available balance in A/c XX... is Rs.X".
+        balance:                extractAmount(body),
+      };
+    },
+  },
+
   // ── 2. CC SPEND (Txn Rs. / Spent Rs. On Card) ─────────────────────────────
   // Catches HDFC CC spend format — 43 messages previously dropped at L2.
   // "Txn Rs.161.00\nOn HDFC Bank Card 4636\nAt airtel-prepaid.paytm@ptyb\nby UPI 120506314239\nOn 24-03"
@@ -563,13 +632,19 @@ const RULES = [
           // "Txn Rs.X\nOn <Bank> Card NNNN" — HDFC multi-line format
           /Txn\s+Rs\.[\d,]+.*On\s+\w[\w\s]+Bank\s+Card\s+\d{4}/is.test(body) ||
           // "Spent Rs.X On <Bank> Card NNNN At MERCHANT" — inline format
-          /Spent\s+Rs\.[\d,]+\s+On\s+\w[\w\s]+Bank\s+Card\s+\d{4}/i.test(body)
+          /Spent\s+Rs\.[\d,]+\s+On\s+\w[\w\s]+Bank\s+Card\s+\d{4}/i.test(body) ||
+          // [FIX] "Paid USD X\nOn HDFC Bank Card NNNN\nat MERCHANT..." — forex
+          // card spend format (Regalia ForexPlus etc.). Confirmed 100% miss
+          // rate for every foreign-currency card transaction before this fix.
+          /Paid\s+(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\s*[\d,.]+.*On\s+\w[\w\s]+Bank\s+Card\s+\d{4}/is.test(body)
         );
       }
     },
     extract(body, messageDate) {
       // Amount: from "Txn Rs.X" or "Spent Rs.X"
       let amountMatch = body.match(/(?:Txn|Spent)\s+Rs\.([\d,]+(?:\.\d{1,2})?)/i);
+      // [FIX] forex format uses "Paid USD X" not "Txn/Spent Rs.X"
+      if (!amountMatch) amountMatch = body.match(/Paid\s+(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\s*([\d,]+(?:\.\d{1,2})?)/i);
       const amount = amountMatch
         ? parseFloat(amountMatch[1].replace(/,/g, ''))
         : extractAmount(body);
@@ -1185,7 +1260,12 @@ const RULES = [
     // phrasing as "Recharge of Rs.X successful", which was already
     // covered) and "Digital Gold purchase of Xg worth Rs.Y successful via
     // Groww on DATE" (digital gold apps).
-    pattern: /paid\s+via\s+\w+.*for|:\s*Rs\.?[\d,]+(?:\.\d{1,2})?\s+paid\s+for|payment\s+of\s+(?:Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?\s+successful\s+for|recharge\s+of\s+(?:Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?\s+successful|gift\s+card\s+purchased\s+successfully|recharged\s+with\s+(?:Rs\.?|INR)\s*[\d,]+|(?:gold|purchase)\s+(?:purchase\s+)?of\s+[\d.]+\s*g(?:rams?)?\s+worth\s+(?:Rs\.?|INR)\s*[\d,]+.*successful/i,
+    // [FIX] "Recharge of INR X is successful for your Airtel Mobile..."
+    // was NOT matching — the old pattern only allowed a bare space before
+    // "successful", not "is successful"/"was successful". Confirmed on
+    // real Airtel recharge confirmations across two datasets, 100% miss
+    // rate before this fix. Added optional "is "/"was " before "successful".
+    pattern: /paid\s+via\s+\w+.*for|:\s*Rs\.?[\d,]+(?:\.\d{1,2})?\s+paid\s+for|payment\s+of\s+(?:Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?\s+successful\s+for|recharge\s+of\s+(?:Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?\s+(?:is\s+|was\s+)?successful|gift\s+card\s+purchased\s+successfully|recharged\s+with\s+(?:Rs\.?|INR)\s*[\d,]+|(?:gold|purchase)\s+(?:purchase\s+)?of\s+[\d.]+\s*g(?:rams?)?\s+worth\s+(?:Rs\.?|INR)\s*[\d,]+.*successful/i,
     extract(body, messageDate) {
       let merchant = null;
       let m = body.match(/^([A-Za-z][A-Za-z0-9 ]{2,30}?):/);           // "BookMyShow:"
@@ -1432,7 +1512,20 @@ function matchMessage(body, messageDate) {
       // understood this, it's just not a transaction" and fell through to
       // Haiku escalation on every single occurrence.
       if (fields.discard_reason) {
-        return { discard: true, reason: fields.discard_reason, rule: rule.id };
+        // [FIX] Previously dropped all extracted fields on discard — fine for
+        // declined_transaction / cc_emi_conversion_not_new_txn (nothing useful
+        // to keep), but balance_disclosure_no_transaction needs its
+        // account_number_masked/bank/balance passed through so the caller can
+        // still update accounts.balance_latest even though no transaction
+        // row is created.
+        return {
+          discard: true,
+          reason: fields.discard_reason,
+          rule: rule.id,
+          account_number_masked: fields.account_number_masked || null,
+          bank: fields.bank || null,
+          balance: fields.balance ?? null,
+        };
       }
 
       const result = {

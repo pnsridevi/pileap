@@ -8,7 +8,8 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { colors, spacing, fontSize, fontWeight, radius } from '@/constants/theme';
 import { SmsReader, SmsMessage } from '../../modules/sms-reader/src/index';
-import { parseSmsMessages, ParsedTransaction } from '@/lib/smsParser';
+import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate } from '@/lib/smsParser';
+import { ingestParsedMessages, IngestResult } from '@/lib/api/transactions';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
 type Mode = 'filtered' | 'debug' | 'parsed';
@@ -25,12 +26,22 @@ export default function TestSmsScreen() {
   const [messages, setMessages]         = useState<SmsMessage[]>([]);
   const [senders, setSenders]           = useState<string[]>([]);
   const [parsed, setParsed]             = useState<ParsedTransaction[]>([]);
+  const [balanceUpdates, setBalanceUpdates] = useState<BalanceUpdate[]>([]);
   const [rawMsgs, setRawMsgs]           = useState<SmsMessage[]>([]);
   const [error, setError]               = useState<string | null>(null);
   const [hasPerm, setHasPerm]           = useState<boolean | null>(null);
   const [mode, setMode]                 = useState<Mode>('filtered');
   const [rawCount, setRawCount]         = useState<number | null>(null);
   const [activeWindow, setActiveWindow] = useState<string | null>(null);
+  // [ADD] ingestParsedMessages() needs the ORIGINAL (ParsedTransaction |
+  // BalanceUpdate)[] union — `parsed` and `balanceUpdates` above were split
+  // apart purely for display purposes and can't be recombined losslessly
+  // (order doesn't matter for ingest, but keeping a single source of truth
+  // avoids ever having to reconstruct it). Kept separate from `parsed` so
+  // fixing the earlier type error didn't require touching this at all.
+  const [rawParseResults, setRawParseResults] = useState<(ParsedTransaction | BalanceUpdate)[]>([]);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
+  const [syncResult, setSyncResult] = useState<IngestResult | null>(null);
 
   async function requestPermission() {
     if (Platform.OS !== 'android') { setError('SMS reading is Android only.'); return; }
@@ -55,7 +66,7 @@ export default function TestSmsScreen() {
   async function fetchFiltered() {
     if (!hasPerm) { await requestPermission(); return; }
     setMode('filtered'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setRawMsgs([]);
+    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
     setRawCount(null); setActiveWindow(null);
     try {
       const result = await SmsReader.getMessages(0, 90);
@@ -67,7 +78,7 @@ export default function TestSmsScreen() {
   async function fetchDebug() {
     if (!hasPerm) { await requestPermission(); return; }
     setMode('debug'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setRawMsgs([]);
+    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
     setRawCount(null); setActiveWindow(null);
     try {
       const result = await SmsReader.getAllSenders();
@@ -80,14 +91,29 @@ export default function TestSmsScreen() {
   async function fetchParsed(fromDays: number, toDays: number, label: string) {
     if (!hasPerm) { await requestPermission(); return; }
     setMode('parsed'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setRawMsgs([]);
+    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
     setRawCount(null); setActiveWindow(label);
     try {
       const msgs = await SmsReader.getMessages(fromDays, toDays);
       // Yield to UI thread before heavy parsing so the loading spinner renders
       await new Promise(resolve => setTimeout(resolve, 0));
       const results = parseSmsMessages(msgs);
-      setParsed(results);
+      setRawParseResults(results);
+      setSyncResult(null);
+      setSyncStatus('idle');
+      // [FIX] parseSmsMessages() returns (ParsedTransaction | BalanceUpdate)[]
+      // since smsParser.ts added the BalanceUpdate branch (pure balance-
+      // disclosure SMS never become a transaction row). setParsed() is typed
+      // ParsedTransaction[], so passing the raw union straight through was a
+      // real type error, not just a strictness nitpick — a BalanceUpdate
+      // genuinely doesn't have txn_date/amount/type/category/etc. Split the
+      // union with the existing isBalanceUpdate() guard instead of widening
+      // the state type and pushing the problem into every render call below
+      // that reads txn.amount/txn.category/etc.
+      const txns = results.filter((r): r is ParsedTransaction => !isBalanceUpdate(r));
+      const balances = results.filter(isBalanceUpdate);
+      setParsed(txns);
+      setBalanceUpdates(balances);
       setRawMsgs(msgs);
       setStatus('done');
     } catch (e: any) { setError(e.message ?? 'Unknown error'); setStatus('error'); }
@@ -104,6 +130,7 @@ export default function TestSmsScreen() {
         approved:       parsed.filter(p => p.status === 'approved').length,
         pending_review: parsed.filter(p => p.status === 'pending_review').length,
         parse_failures: parsed.filter(p => p.parse_failure !== null).length,
+        balance_updates: balanceUpdates.length,
         failure_breakdown: parsed.reduce<Record<string, number>>((acc, p) => {
           if (p.parse_failure) acc[p.parse_failure] = (acc[p.parse_failure] ?? 0) + 1;
           return acc;
@@ -115,6 +142,7 @@ export default function TestSmsScreen() {
         }, {}),
       },
       transactions: parsed,
+      balance_updates: balanceUpdates,
     };
 
     try {
@@ -132,6 +160,51 @@ export default function TestSmsScreen() {
       Alert.alert('Export failed', e.message ?? 'Unknown error');
     }
   }
+
+  async function syncToSupabase() {
+    if (rawParseResults.length === 0) {
+      Alert.alert('Nothing to sync', 'Run the parser first.');
+      return;
+    }
+
+    // [FLAG] No idempotency key exists on `transactions` yet (see the
+    // KNOWN GAPS note at the top of src/lib/api/transactions.ts) —
+    // re-syncing the same window WILL insert duplicate rows. This confirm
+    // step is a manual guard for testing only, not a real dedup solution.
+    // Deliberately deferred per project decision until the parsing →
+    // review → edit/split flow is confirmed working end-to-end.
+    Alert.alert(
+      'Sync to Supabase?',
+      `This will insert ${parsed.length} transaction(s) and apply ${balanceUpdates.length} balance update(s). ` +
+      `There is no duplicate-detection yet — re-syncing the same window will create duplicate rows. Continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sync',
+          style: 'destructive',
+          onPress: async () => {
+            setSyncStatus('syncing');
+            setSyncResult(null);
+            try {
+              const result = await ingestParsedMessages(rawParseResults);
+              setSyncResult(result);
+              setSyncStatus('done');
+              Alert.alert(
+                'Sync complete',
+                `${result.transactionsInserted} transaction(s) inserted, ` +
+                `${result.balancesUpdated} balance update(s) applied` +
+                (result.errors.length > 0 ? `, ${result.errors.length} error(s) — see details below.` : '.'),
+              );
+            } catch (e: any) {
+              setSyncStatus('error');
+              Alert.alert('Sync failed', e.message ?? 'Unknown error');
+            }
+          },
+        },
+      ],
+    );
+  }
+
 
   async function exportRawSms(fromDays: number, toDays: number, label: string) {
     if (!hasPerm) { await requestPermission(); return; }
@@ -233,6 +306,34 @@ export default function TestSmsScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Sync to Supabase — manual, no dedup yet (see syncToSupabase comment) */}
+        {mode === 'parsed' && status === 'done' && (
+          <TouchableOpacity
+            style={[s.syncBtn, syncStatus === 'syncing' && s.syncBtnDisabled]}
+            onPress={syncToSupabase}
+            disabled={syncStatus === 'syncing'}
+            activeOpacity={0.8}
+          >
+            {syncStatus === 'syncing' ? (
+              <ActivityIndicator color="#065f46" />
+            ) : (
+              <Text style={s.syncBtnText}>☁️ Sync to Supabase — {activeWindow}</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {syncResult && (
+          <View style={s.syncResultBox}>
+            <Text style={s.syncResultText}>
+              ✅ {syncResult.transactionsInserted} inserted · 🏦 {syncResult.balancesUpdated} balance updates
+              {syncResult.errors.length > 0 ? ` · ⚠️ ${syncResult.errors.length} errors` : ''}
+            </Text>
+            {syncResult.errors.slice(0, 5).map((err, i) => (
+              <Text key={i} style={s.syncErrorText}>#{err.raw_sms_id}: {err.message}</Text>
+            ))}
+          </View>
+        )}
+
         {/* ── Raw SMS export buttons ── */}
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>📤 EXPORT RAW SMS — All messages, no filter</Text>
@@ -297,6 +398,9 @@ export default function TestSmsScreen() {
             <Text style={s.resultCount}>
               {activeWindow} · {parsed.length} parsed · ✅ {approved} approved · ⏳ {needReview} review · ⚠️ {failures} failed
             </Text>
+            {balanceUpdates.length > 0 && (
+              <Text style={s.resultSub}>🏦 {balanceUpdates.length} balance-disclosure SMS (not transactions, routed to accounts.balance_latest)</Text>
+            )}
           </View>
         )}
 
@@ -392,6 +496,14 @@ const s = StyleSheet.create({
 
   exportBtn:     { backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#86efac', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
   exportBtnText: { fontSize: fontSize.sm, color: '#15803d', fontWeight: fontWeight.semibold },
+
+  syncBtn:         { backgroundColor: '#d1fae5', borderWidth: 1, borderColor: '#34d399', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
+  syncBtnDisabled: { opacity: 0.6 },
+  syncBtnText:     { fontSize: fontSize.sm, color: '#065f46', fontWeight: fontWeight.bold },
+
+  syncResultBox:  { padding: spacing.sm, backgroundColor: '#ecfdf5', borderRadius: radius.md, borderWidth: 1, borderColor: '#a7f3d0' },
+  syncResultText: { fontSize: fontSize.xs, fontWeight: fontWeight.semibold, color: '#065f46' },
+  syncErrorText:  { fontSize: 10, color: '#b91c1c', marginTop: 2 },
 
   debugBtn:     { backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#d1d5db', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
   debugBtnText: { fontSize: fontSize.sm, color: '#374151', fontWeight: fontWeight.medium },

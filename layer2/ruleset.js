@@ -215,6 +215,19 @@ function extractAmount(body) {
   const bare = body.match(/transaction of\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (bare) { const v = parseFloat(bare[1].replace(/,/g, '')); if (v > 0) return v; }
 
+  // [ADD] "Amt 375.36 will be refunded..." / "Amt 235 will be refunded..."
+  // — IRCTC's own refund template states the amount via "Amt" with no
+  // Rs./INR/₹ token anywhere in the message. All 10 real IRCTC refund
+  // messages (with a stated amount) in a real device export used this
+  // exact form and had amount come back null as a result — the
+  // PROVISIONAL_CREDIT_NOTICE rule's pattern matched correctly, but
+  // matchMessage()'s final `amount === null` guard silently discarded
+  // every one of them anyway. Generic "Amt" + number check, not
+  // IRCTC-specific — must come before the final null return, same as fx
+  // and "transaction of" above.
+  const amt = body.match(/\bAmt\.?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  if (amt) { const v = parseFloat(amt[1].replace(/,/g, '')); if (v > 0) return v; }
+
   return null;
 }
 
@@ -307,12 +320,33 @@ function extractMerchant(body) {
     return null;
   }
 
+  // [ADD] "IB FUNDS TRANSFER CR/DR-XXXXXXXXXX<digits>-<NAME>" and
+  // "-TPT-<purpose>-<NAME>" — self-transfer / internal bank-transfer
+  // notification templates. Confirmed in real data: both the CR and DR legs
+  // of this exact template (₹20k-₹1L, HDFC IMPS/UPI) carried a real name
+  // ("SRIDEVI P N", "VIJAYARAGHAVAN CHAKRAVARTHY") that neither this
+  // function's existing patterns nor the null guards further below ever
+  // captured — they only recognized the "IB FUNDS TRANSFER" LABEL itself
+  // and correctly discarded that (it's not a merchant), but discarded the
+  // real name right along with it instead of extracting it separately.
+  // Placed before the other patterns since none of them match this
+  // template's shape at all ("for IB FUNDS TRANSFER CR-..." has no "To ",
+  // "towards", "transfer from ... Ref", or "from VPA" token to key off).
+  let m = body.match(/\bIB\s+(?:SS\s+)?FUNDS\s+TRANSFER\s+(?:CR|DR)-X+\d+-([A-Z][A-Z .]{2,40}?)(?:\.|\s*$)/i);
+  if (m) return m[1].trim();
+  m = body.match(/X+\d+-TPT-.{2,40}?-([A-Z][A-Z .]{2,40}?)(?:\.|\s*$)/i);
+  if (m) return m[1].trim();
+
   // "To MERCHANT\n" or "To MERCHANT On" — HDFC UPI standard format
   // [FIX] Added "successful"/"from A/c" as additional stop tokens — messages
   // like "Fee payment of Rs.X to BITS Pilani successful from A/c XX1354 on..."
   // were capturing "BITS Pilani successful from A/c XX1354" as the merchant
   // instead of stopping cleanly at "successful".
-  let m = body.match(/\bTo\s+(.{3,40}?)(?:\s*\n|\s+On\s|\s+Ref\s|\s+via\s|\s+successful\b|\s+from\s+A\/c)/i);
+  // [FIX] Added "thru" as a stop token — PNB's own phrasing ("...to SRIDEVI
+  // P N thru UPI:654225849876.Bal...") wasn't recognized by any existing
+  // stop token, so the whole "To " pattern failed to match at all and this
+  // fell through to null despite the name being right there in the text.
+  m = body.match(/\bTo\s+(.{3,40}?)(?:\s*\n|\s+On\s|\s+Ref\s|\s+via\s|\s+successful\b|\s+from\s+A\/c|\s+thru\s)/i);
   if (m) {
     const candidate = m[1].trim();
     // [ADD] Null guard: raw IB Funds Transfer label leaking as merchant
@@ -455,6 +489,15 @@ function classifyVpa(vpa) {
     'bookmyshow', 'pvr', 'inox', 'google', 'microsoft', 'anthropic', 'cleartax',
     'zerodha', 'groww', 'upstox', 'shriramlife', 'lic', 'hdfcbank', 'icicibank',
     'sbi', 'axisbank', 'kotak', 'hdfc', 'irctc.payu', 'bbmps',
+    // [FIX] Payment aggregator / payout-gateway handles. Confirmed real gap:
+    // 'payout.cashfreepayout@rbl' (IRCTC refunds routed through Cashfree)
+    // was falling through to the generic person-shaped regex below and
+    // getting requires_classification: true on every occurrence, instead
+    // of being recognized as the merchant-side payout it actually is.
+    // These are payment-gateway/aggregator brand names, not any single
+    // vendor's own VPA, so recognizing them here benefits every merchant
+    // that routes payouts through them, not just IRCTC.
+    'cashfree', 'razorpay', 'payu', 'billdesk', 'ccavenue', 'instamojo',
   ];
   if (merchantPrefixes.some(p => handle.startsWith(p) || handle.includes(p))) {
     return 'merchant';
@@ -470,13 +513,40 @@ function classifyVpa(vpa) {
 // SELF-TRANSFER DETECTION
 // ─────────────────────────────────────────────────────────────────────────────
 
+// [FIX — this pass] Two categories removed from this function, both
+// confirmed wrong against real data rather than assumed:
+//
+// 1. "-TPT-<purpose>-<NAME>" REMOVED. This is a generic bank narration
+//    code for "Third Party Transfer" — a transfer INVOLVING a third
+//    party, which is structurally the OPPOSITE of a self-transfer signal,
+//    not a variant of one. Confirmed on real data: every occurrence (9/9,
+//    ~Rs.4.5L, merchant "VIJAYARAGHAVAN CHAKRAVARTHY") was a genuine
+//    one-directional third-party payment ("House expenses", or "PPF" as
+//    the PAYER's own stated purpose) with no matching offsetting leg
+//    anywhere — never a self-transfer. IB FUNDS TRANSFER (kept below) is
+//    a different, HDFC-specific notation that in the same dataset was
+//    correct 11/11 times with zero false positives.
+//
+// 2. PPF/SSY/NPS/RD/FD keywords and broker names (zerodha/groww/upstox/
+//    indmoney/kuvera) REMOVED. These are asset/investment ACQUISITIONS —
+//    cash changing form (bank balance -> equity/scheme holding) — not
+//    transfers between two of the user's own accounts. A contra pair by
+//    definition needs a matching offsetting leg; money sent to a broker
+//    or a government scheme has no corresponding credit leg to ever find,
+//    so it can never resolve through matching anyway — it was only ever
+//    getting auto-applied with no confirmation and no matched partner.
+//    These already carry correct type/category (Investment > Stocks,
+//    Asset > Government Schemes, etc.) via the taxonomy classifier — that
+//    classification should stand on its own, not be hidden by an
+//    incorrect contra flag.
+//
+// Kept: IB FUNDS TRANSFER (real self-transfer signal, 0 false positives)
+// and credit card bill payment (a distinct case, not covered by this
+// pass's investigation — left as-is).
 function isPossibleSelfTransfer(body) {
-  const b = body.toLowerCase();
   return (
     /ib\s+(?:ss\s+)?funds\s+transfer/i.test(body)          ||
-    /\bppf\b|\bssy\b|\bnps\b|\brd\s+a\/c\b|\bfd\s+a\/c\b/i.test(body) ||
-    /\bcredit\s+card\s+(?:bill|payment|due)\b/i.test(body)  ||
-    /zerodha|groww|upstox|indmoney|kuvera/i.test(b)
+    /\bcredit\s+card\s+(?:bill|payment|due)\b/i.test(body)
   );
 }
 
@@ -1422,6 +1492,140 @@ const RULES = [
     },
   },
 
+  // ── 10b. VENDOR SETTLEMENT / PAYOUT NOTICE (unconfirmed) ───────────────────
+  // [ADD] Broker/vendor settlement or payout confirmations that describe
+  // money having been sent from the VENDOR'S side, using none of the
+  // bank-side verbs every other rule in this file keys on (credited/
+  // deposited/received/refunded/reversed/debited/deducted/Sent/Withdrawn/
+  // Spent). Real gap this closes: "Your quarterly settlement payout for
+  // Rs.83.24 for Equity a/c (XOZ765) is processed with transaction ID:
+  // YESF361855691909... You should see the funds in your bank account
+  // within 24 hours -Zerodha" — matched no existing rule at all and was
+  // being lost entirely (see the Layer 1 fix that lets this class of
+  // message through in the first place — it used to die at no_signal
+  // before ever reaching here). Per real device data, some small broker/
+  // vendor settlements never generate a separate bank Credit Alert SMS,
+  // so this vendor-side message may be the ONLY signal that will ever
+  // exist for that money movement.
+  //
+  // The pattern's test() explicitly excludes every bank-side verb so this
+  // rule can NEVER shadow or steal a message GENERIC_CREDIT/GENERIC_DEBIT
+  // (or any more specific rule above) would have matched with higher
+  // confidence — placement before GENERIC_DEBIT/GENERIC_CREDIT is
+  // defensive ordering, not load-bearing, the same way REFUND_INITIATED
+  // just above is guarded.
+  //
+  // Generic by construction — no vendor/sender name is hardcoded anywhere
+  // in this rule. Matches purely on structural "settlement/payout ...
+  // processed" vocabulary, so it applies identically to Groww, Upstox,
+  // insurers, or any other payout source, for any user.
+  //
+  // Deliberately low, fixed confidence (0.5) — lower than REFUND_INITIATED
+  // (0.6), since a refund-initiated notice at least names a specific
+  // order/merchant, while this pattern is a bare vendor promise with
+  // nothing to cross-check against yet. account_number_masked is always
+  // null here (vendors don't cite the receiving bank account), which
+  // already forces status:'pending_review' via smsParser.ts's existing
+  // needsReview logic — no extra flag needed for that part. This rule
+  // does NOT yet mark the row for the bank-confirmation reconciliation
+  // check (transactions.ts) — that's the next piece of work, deliberately
+  // separated out.
+  {
+    id: 'VENDOR_SETTLEMENT_NOTICE',
+    pattern: {
+      test(body) {
+        if (/\b(?:credited|deposited|received|refunded|reversed|debited|deducted|withdrawn|spent|sent)\b/i.test(body)) {
+          return false;
+        }
+        const hasSettlementLanguage = /\bsettlement\b|\bpayout\b/i.test(body);
+        const hasProcessedLanguage = /\bis\s+processed\b|\bhas\s+been\s+processed\b/i.test(body);
+        return hasSettlementLanguage && hasProcessedLanguage;
+      },
+    },
+    extract(body, messageDate) {
+      // Trailing "-VendorName" signature — common across Indian bank/vendor
+      // SMS ("-Zerodha", "-TANGEDCO", "-SBI"). Generic structural pattern,
+      // no names hardcoded. Falls back to null (same as REFUND_INITIATED's
+      // own merchant handling) if the message doesn't end this way.
+      const vendorMatch = body.trim().match(/-\s*([A-Za-z][A-Za-z .&]{2,30})\s*$/);
+      return {
+        direction:             'credit',
+        amount:                extractAmount(body),
+        bank:                  extractBank(body),
+        channel:               'Vendor Settlement',
+        account_number_masked: extractAccount(body),
+        txn_date:              extractDate(body) || messageDate,
+        merchant:              vendorMatch ? vendorMatch[1].trim() : null,
+        balance:               null,
+        ref_number:            null,
+        ref_type:              null,
+        possible_contra:       false,
+        confidence:            0.5,
+      };
+    },
+  },
+
+  // ── 10c. PROVISIONAL CREDIT NOTICE (future-tense — "will be X") ────────────
+  // [ADD] Companion to VENDOR_SETTLEMENT_NOTICE above, for the future-tense
+  // phrasing that used to be hard-dropped at Layer 1 (SmsReaderModule.kt /
+  // layer1sim.js — see the future_credit rule there, now changed from a
+  // drop to a pass-through). Real gap: 11 real IRCTC refund messages
+  // ("PNR 4857168815 ticket cancelled. Amt 375.36 will be refunded within
+  // 3-4 days... -IRCTC") were being silently and permanently lost. Also
+  // covers the original case that justified the old Layer 1 drop in the
+  // first place — an insurance maturity notice ("Rs.713,954.55 will be
+  // credited...") — but SAFELY now: this rule runs before GENERIC_CREDIT
+  // and explicitly captures the "will be" future-tense form, so
+  // GENERIC_CREDIT's bare \bcredited\b/\brefunded\b patterns never get a
+  // chance to misread either message as an already-completed transaction.
+  // That interception is what prevents the original regression now,
+  // instead of an outright drop.
+  //
+  // Deliberately a SEPARATE rule from VENDOR_SETTLEMENT_NOTICE rather than
+  // merged into it: that rule explicitly EXCLUDES bodies containing
+  // "refunded"/"credited" (so it can never shadow GENERIC_CREDIT); this
+  // rule exists specifically FOR bodies containing those words, but only
+  // in this one future-tense construction. The two patterns are mutually
+  // exclusive by construction and cannot both match the same message.
+  //
+  // Generic by construction — no vendor/sender name hardcoded; matches
+  // purely on the "will be credited/refunded/processed" construction,
+  // so it applies identically to IRCTC, insurers, any bank, any user.
+  //
+  // Same downstream treatment as VENDOR_SETTLEMENT_NOTICE: low fixed
+  // confidence (0.5), account_number_masked always null (vendors don't
+  // cite the receiving bank account), which already forces
+  // status:'pending_review' via smsParser.ts's existing needsReview logic.
+  // transactions.ts is what marks this row for later reconciliation and
+  // hides it once a matching real bank credit arrives — not handled here.
+  {
+    id: 'PROVISIONAL_CREDIT_NOTICE',
+    pattern: {
+      test(body) {
+        return /will\s+be\s+(?:credited|refunded|processed)/i.test(body);
+      },
+    },
+    extract(body, messageDate) {
+      // Trailing "-VendorName" signature — same generic extractor as
+      // VENDOR_SETTLEMENT_NOTICE. Falls back to null if absent.
+      const vendorMatch = body.trim().match(/-\s*([A-Za-z][A-Za-z .&]{2,30})\s*$/);
+      return {
+        direction:             'credit',
+        amount:                extractAmount(body),
+        bank:                  extractBank(body),
+        channel:               'Provisional Credit',
+        account_number_masked: extractAccount(body),
+        txn_date:              extractDate(body) || messageDate,
+        merchant:              vendorMatch ? vendorMatch[1].trim() : null,
+        balance:               null,
+        ref_number:            null,
+        ref_type:              null,
+        possible_contra:       false,
+        confidence:            0.5,
+      };
+    },
+  },
+
   // ── 11. GENERIC DEBIT ──────────────────────────────────────────────────────
   {
     id: 'GENERIC_DEBIT',
@@ -1481,7 +1685,13 @@ const RULES = [
         vpa_type:                vpaType,
         requires_classification: vpaType === 'person' || vpaType === 'unknown',
         ...extractRefNumber(body),
-        possible_contra:         false,
+        // [FIX] Was hardcoded `false`. GENERIC_DEBIT (above) correctly calls
+        // isPossibleSelfTransfer(body), but this credit-side rule never did
+        // — confirmed asymmetry in real data: the DR leg of an "IB FUNDS
+        // TRANSFER"/self-transfer pair was flagged possible_contra:true,
+        // while the matching CR leg (same account suffix, same name,
+        // opposite direction) was hardcoded false. Now symmetric.
+        possible_contra:         isPossibleSelfTransfer(body),
         confidence:              vpaType === 'merchant' ? 0.85
                                : vpaType === 'person'   ? 0.75
                                : 0.80,

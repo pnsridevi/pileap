@@ -200,8 +200,8 @@ export default function TransactionsFeedScreen() {
 
       <View style={styles.banner}>
         <Text style={styles.bannerText}>
-          Transactions ≥ ₹5,000 always need review, regardless of source. Tap Edit to correct any row, then Submit
-          to save your changes for this page.
+          Transactions ≥ ₹5,000, or that look like a possible duplicate of another transaction, always need
+          review. Tap Edit to correct any row, then Submit to save your changes for this page.
         </Text>
       </View>
 

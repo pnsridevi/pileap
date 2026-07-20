@@ -386,6 +386,7 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   // ── Food & Dining ─────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Quick Commerce',
+    direction: 'debit',
     patterns: [
       /\bblinkit\b/i,
       // [FIX] \bzepto\b → \bzepto (no trailing \b) — ZEPTONOW was not matching.
@@ -404,14 +405,26 @@ const TAXONOMY: TaxonomyEntry[] = [
   // NOTE: \bpluxee\b and \bmeal\s+card\b intentionally NOT here — Pluxee is
   // a payment instrument. Merchant at POS determines category.
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Restaurants',
+    direction: 'debit',
     patterns: [
       /\bzomato\b/i, /\bswiggy\b/i, /\brestaurant\b/i, /\bpizza\s+hut\b/i,
       /\bdominos?\b/i, /\bkfc\b/i, /\bmcdonald'?s?\b/i, /\bsubway\b/i,
       /\bburger\s+king\b/i, /\bstarbucks\b/i, /\bcafe\b/i,
       /\bdining\b/i, /\bcoffee\b/i, /\bmeal\b/i,
+      // [ADD — this pass] Generic sweets/bhavan-chain patterns. "Bhavan"
+      // is a common South Indian vegetarian-restaurant naming convention
+      // (Saravana Bhavan, Adyar Ananda Bhavan/A2B, etc.) — distinct from
+      // the \bhotel\b exclusion noted above, since "bhavan" doesn't carry
+      // the same lodging ambiguity "hotel" does in Indian usage.
+      // \bsweets?\b and \bmithai\b cover sweet shops generically
+      // (confirmed real gap: "SHREE GURU SWEETS", "MEENA MITHAI MANDIR"
+      // both landed uncategorized). Deliberately generic — keyed on the
+      // naming convention, not any single merchant name.
+      /\bbhavan\b/i, /\bsweets?\b/i, /\bmithai\b/i,
     ] },
 
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Groceries',
+    direction: 'debit',
     patterns: [/\bbigbasket\b/i, /\bd[\s-]?mart\b/i, /\breliance\s+(fresh|smart)\b/i,
                /\bsupermarket\b/i, /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
 
@@ -424,6 +437,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // cost here is low and the false-negative cost of requiring more context
   // is high — most milk-booth SMS are terse.
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Milk & Dairy',
+    direction: 'debit',
     patterns: [/\bmilk\b/i, /\bdairy\b/i, /\bmilk\s+booth\b/i] },
 
   // ── Entertainment — OTT MUST be above Shopping ────────────────────────────
@@ -431,6 +445,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // Previously OTT was below Shopping, so "Amazon Prime" scored 1 on both
   // and Shopping won because it appeared first in the array.
   { type: 'Expense', category: 'Entertainment', sub_category: 'OTT Subscriptions',
+    direction: 'debit',
     patterns: [
       /\bnetflix\b/i, /\bhotstar\b/i, /\bdisney\+?\s*hotstar\b/i,
       /\bamazon\s+prime\b/i,   // explicit "amazon prime" — must be here, not Shopping
@@ -438,7 +453,17 @@ const TAXONOMY: TaxonomyEntry[] = [
     ] },
 
   // ── Shopping ──────────────────────────────────────────────────────────────
+  // [FIX — this pass] direction: 'debit' added. Real data showed refund
+  // credits from these same merchants (e.g. "Credit Alert! Rs.246.00
+  // credited...from VPA flipkart.hypg@yespay", "...from VPA
+  // amazon.refunds@axisbank") were matching this bare merchant-name
+  // pattern and getting tagged as Shopping spend with a POSITIVE amount —
+  // a sign-inconsistent, confusing result (money coming IN labeled as an
+  // expense category). A genuine online-shopping purchase is always a
+  // debit; a credit from these merchants is a refund/cashback, not a new
+  // purchase. Same root-cause class as the PPF/SSY direction fix above.
   { type: 'Expense', category: 'Shopping', sub_category: 'Online Shopping',
+    direction: 'debit',
     patterns: [
       // [FIX] \bamazon\b(?!\s+prime) — negative lookahead prevents "Amazon Prime"
       // from matching here (it already matched OTT above).
@@ -447,23 +472,44 @@ const TAXONOMY: TaxonomyEntry[] = [
     ] },
 
   { type: 'Expense', category: 'Shopping', sub_category: 'Electronics',
+    direction: 'debit',
     patterns: [/\bcroma\b/i, /\bvijay\s+sales\b/i, /\breliance\s+digital\b/i] },
 
   // ── Transportation ────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Transportation', sub_category: 'Tolls & FASTag',
+    direction: 'debit',
     patterns: [/\bfastag\b/i, /\bnhai\b/i, /\btoll\s+(plaza|gate|debit|charge)\b/i] },
 
   { type: 'Expense', category: 'Transportation', sub_category: 'Ride Hailing',
-    patterns: [/\buber\b/i, /\bola\b/i, /\brapido\b/i, /\bblusmart\b/i] },
+    // [ADD — this pass] "roppentransport" — Roppen Transportation Services
+    // Pvt Ltd is Rapido's registered legal entity name, which is what some
+    // POS/UPI-handle SMS templates surface as the merchant instead of
+    // "Rapido". Different string entirely from the existing \brapido\b
+    // pattern (no shared substring), so needs its own pattern, not a
+    // matching-algorithm fix. Verified clean against all real merchant
+    // names across both users — no collisions.
+    direction: 'debit',
+    patterns: [/\buber\b/i, /\bola\b/i, /\brapido\b/i, /\bblusmart\b/i, /\broppentransport\b/i] },
 
   { type: 'Expense', category: 'Transportation', sub_category: 'Fuel',
+    direction: 'debit',
     patterns: [/\bpetrol\s+(pump|station|bunk)\b/i, /\bhpcl\b/i, /\biocl\b/i, /\bbpcl\b/i] },
 
   // [ADD] Transportation > Bus
   { type: 'Expense', category: 'Transportation', sub_category: 'Bus',
+    direction: 'debit',
     patterns: [/\bredbus\b/i, /\babhibus\b/i, /\bkeybus\b/i] },
 
+  // [FIX — this pass] direction: 'debit' added. Real data showed IRCTC
+  // refund credits (both a direct "Credit Alert...from VPA
+  // irctc.payu@mairtel" and a "ticket cancelled...will be refunded"
+  // message) matching this bare merchant-name pattern and getting tagged
+  // as Transportation spend with a POSITIVE amount. Booking a train/metro
+  // ticket is always a debit; a credit mentioning these merchants is a
+  // cancellation refund, not a new fare purchase. Same root-cause class as
+  // the PPF/SSY direction fix above.
   { type: 'Expense', category: 'Transportation', sub_category: 'Public Transit',
+    direction: 'debit',
     patterns: [
       /\bmetro\s+(rail|card|recharge|fare)\b/i,
       /\birctc\b/i,
@@ -476,6 +522,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // data ("EXPRESS AVENUE PARKING", "CMRL GOVERNMENT ESTATE PA" — the
   // latter almost certainly a metro-station parking area abbreviation).
   { type: 'Expense', category: 'Transportation', sub_category: 'Parking',
+    direction: 'debit',
     patterns: [/\bparking\b/i] },
 
   // [ADD — this pass] Transportation > Vehicle Service & Repair. Evidenced
@@ -484,6 +531,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // accepted tradeoff since a false positive here just means a vehicle
   // -adjacent spend gets a vehicle-adjacent category, low real-world cost.
   { type: 'Expense', category: 'Transportation', sub_category: 'Vehicle Service & Repair',
+    direction: 'debit',
     patterns: [
       /\bmotors?\b/i, /\bgarage\b/i, /\bworkshop\b/i,
       /\bcar\s+service\b/i, /\bbike\s+service\b/i, /\bauto\s*mobile\b/i,
@@ -491,10 +539,23 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   // ── Utilities ─────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Utilities', sub_category: 'Electricity',
+    // [ADD — this pass] National electricity DISCOM abbreviations beyond the
+    // existing Karnataka (escom/bescom) and Maharashtra (mseb) coverage —
+    // Tamil Nadu, Kerala, Maharashtra, Punjab, UP, West Bengal, Haryana (x2),
+    // Rajasthan, MP, Andhra (x2), Telangana, West Bengal private, Gujarat
+    // private, Mumbai/Delhi private. Verified clean against all real
+    // merchant names across both users — no collisions.
+    direction: 'debit',
     patterns: [/\bescom\b/i, /\bmseb\b/i, /\bbescom\b/i, /\btata\s+power\b/i,
-               /\bpower\s+(bill|payment)\b/i, /\belectricity\s+(bill|payment)\b/i] },
+               /\bpower\s+(bill|payment)\b/i, /\belectricity\s+(bill|payment)\b/i,
+               /\btangedco\b/i, /\btneb\b/i, /\bkseb\b/i, /\bmsedcl\b/i,
+               /\bpspcl\b/i, /\buppcl\b/i, /\bwbsedcl\b/i, /\bdhbvn\b/i,
+               /\buhbvn\b/i, /\bjvvnl\b/i, /\bmppkvvcl\b/i, /\bapspdcl\b/i,
+               /\bapepdcl\b/i, /\btsspdcl\b/i, /\bcesc\b/i,
+               /\btorrent\s*power\b/i, /\badani\s*electricity\b/i] },
 
   { type: 'Expense', category: 'Utilities', sub_category: 'Gas',
+    direction: 'debit',
     patterns: [/\bgas\s+(bill|payment)\b/i, /\bindane\b/i, /\bbharat\s+gas\b/i, /\bhp\s+gas\b/i] },
 
   // [ADD — this pass] Utilities > Piped Gas (PNG). Kept distinct from
@@ -502,6 +563,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // cylinder refills. Bare \bpng\b intentionally excluded (too short, risks
   // matching unrelated 3-letter occurrences); requires accompanying context.
   { type: 'Expense', category: 'Utilities', sub_category: 'Piped Gas',
+    direction: 'debit',
     patterns: [
       /\bpiped\s+gas\b/i, /\bpng\s+bill\b/i,
       /\bmahanagar\s+gas\b/i, /\bindraprastha\s+gas\b/i,
@@ -509,14 +571,22 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   // [ADD — this pass] Utilities > Water.
   { type: 'Expense', category: 'Utilities', sub_category: 'Water',
+    direction: 'debit',
     patterns: [
       /\bwater\s+(bill|tax|tanker|board|supply|charge)\b/i,
       /\bbwssb\b/i, /\bhmwssb\b/i, /\bjal\s+board\b/i,
+      // [ADD — this pass] cmwssb = Chennai Metropolitan Water Supply and
+      // Sewerage Board; djb = Delhi Jal Board; mcgm = Mumbai's municipal
+      // corporation (handles water billing among other services). Verified
+      // clean against all real merchant names across both users — cmwssb
+      // matches only the intended real merchant, no false positives.
+      /\bcmwssb\b/i, /\bdjb\b/i, /\bmcgm\b/i,
     ] },
 
   // [ADD — this pass] Utilities > DTH & Cable TV. No prior category existed
   // for this at all.
   { type: 'Expense', category: 'Utilities', sub_category: 'DTH & Cable TV',
+    direction: 'debit',
     patterns: [
       /\btata\s*sky\b/i, /\bd2h\b/i, /\bdish\s*tv\b/i,
       /\bsun\s+direct\b/i, /\bdth\s+recharge\b/i, /\bcable\s+tv\b/i,
@@ -534,6 +604,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // Fiber/Airtel Fiber fall through to the Broadband entry below instead of
   // tying with (and, by array order, losing to) this entry.
   { type: 'Expense', category: 'Telecom', sub_category: 'Mobile Recharge',
+    direction: 'debit',
     patterns: [
       /\bjio\b(?!\s*(mart|saavn|cinema|hotstar|fiber))/i,
       /\breliance\s+jio\b/i,
@@ -547,6 +618,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // any ISP debit was previously falling through entirely. Also added
   // generic wifi/internet bill patterns for ISPs not explicitly named.
   { type: 'Expense', category: 'Utilities', sub_category: 'Broadband',
+    direction: 'debit',
     patterns: [
       /\bjio\s+fiber\b/i, /\bairtel\s+fiber\b/i,
       /\bact\s+fibernet\b/i, /\bhathway\b/i, /\bexcitel\b/i, /\bbsnl\s+broadband\b/i,
@@ -559,15 +631,22 @@ const TAXONOMY: TaxonomyEntry[] = [
   // (extremely common Indian pharmacy-naming convention) only had
   // \bpharmacy\b to match against before this.
   { type: 'Expense', category: 'Healthcare', sub_category: 'Pharmacy',
+    direction: 'debit',
     patterns: [/\bapollo\s+pharmacy\b/i, /\bmedplus\b/i, /\bnetmeds\b/i,
                /\bpharmeasy\b/i, /\b1mg\b/i, /\bpharmacy\b/i, /\bmedicals?\b/i] },
 
   { type: 'Expense', category: 'Healthcare', sub_category: 'Hospital & Clinic',
+    // [ADD — this pass] "bone" — orthopedic/bone-joint clinics commonly
+    // include it directly in the business name (e.g. "STAR BONE JOINT
+    // CENTER"). Verified clean against every real merchant name across both
+    // users — matches only the intended orthopedic clinic, no collisions.
+    direction: 'debit',
     patterns: [/\bhospital\b/i, /\bclinic\b/i, /\bfortis\b/i,
-               /\bapollo\s+hospitals?\b/i, /\bconsultation\s+fee\b/i] },
+               /\bapollo\s+hospitals?\b/i, /\bconsultation\s+fee\b/i, /\bbone\b/i] },
 
   // ── Entertainment (Movies) ────────────────────────────────────────────────
   { type: 'Expense', category: 'Entertainment', sub_category: 'Movies & Events',
+    direction: 'debit',
     patterns: [
       /\bbookmyshow\b/i,
       // [FIX] \bpvr\b → \bpvr (no trailing \b) — pvrinox was not matching.
@@ -578,11 +657,13 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   // ── Education ─────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Education', sub_category: 'Tuition & Courses',
+    direction: 'debit',
     patterns: [/\bbyju'?s?\b/i, /\bunacademy\b/i, /\budemy\b/i,
                /\bschool\s+fee\b/i, /\bcollege\s+fee\b/i, /\btuition\s+fee\b/i] },
 
   // ── Travel ────────────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Travel', sub_category: 'Flight',
+    direction: 'debit',
     patterns: [
       /\bindigo\b/i, /\bair\s+india\b/i, /\bspicejet\b/i,
       /\bvistara\b/i, /\bflight\s+ticket\b/i,
@@ -596,6 +677,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // \bhotel\b alone removed — it is ambiguous in Indian context.
   // \bhotel\s+booking\b kept — "hotel booking" strongly implies a stay.
   { type: 'Expense', category: 'Travel', sub_category: 'Accommodation',
+    direction: 'debit',
     patterns: [
       /\boyorooms?\b/i, /\btreebo\b/i, /\bfabhotel\b/i,
       /\bhotel\s+booking\b/i, /\bgoibibo\b/i,
@@ -609,10 +691,12 @@ const TAXONOMY: TaxonomyEntry[] = [
   // Flight/Accommodation entries so brand-specific matches still win ties
   // when a merchant name happens to contain both.
   { type: 'Expense', category: 'Travel', sub_category: 'General Travel',
+    direction: 'debit',
     patterns: [/\btravels?\b/i] },
 
   // ── Rent & Housing ────────────────────────────────────────────────────────
   { type: 'Expense', category: 'Rent & Housing', sub_category: 'House Rent',
+    direction: 'debit',
     patterns: [/\bhouse\s+rent\b/i, /\bflat\s+rent\b/i,
                /\brent\s+(payment|paid|transfer)\b/i, /\bmonthly\s+rent\b/i] },
 
@@ -621,6 +705,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // appear with a qualifying word; the other patterns are specific enough
   // to stand alone.
   { type: 'Expense', category: 'Rent & Housing', sub_category: 'Maintenance & Society Charges',
+    direction: 'debit',
     patterns: [
       /\bmaintenance\s+(charge|fee|bill)\b/i, /\bsociety\s+maintenance\b/i,
       /\bapartment\s+maintenance\b/i, /\bflat\s+maintenance\b/i,
@@ -629,19 +714,23 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   // ── Finance Charges ───────────────────────────────────────────────────────
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Cash Withdrawal',
+    direction: 'debit',
     patterns: [/\batm\s+(debit|withdrawal|wdl|cash)\b/i, /\bcash\s+withdrawal\b/i] },
 
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Bank Charges',
+    direction: 'debit',
     patterns: [/\bservice\s+charge\b/i, /\bannual\s+(fee|charge)\b/i,
                /\bpenalty\b/i, /\blate\s+payment\s+fee\b/i] },
 
   // ── Household (new category, this pass) ───────────────────────────────────
   { type: 'Expense', category: 'Household', sub_category: 'Newspaper & Magazine',
+    direction: 'debit',
     patterns: [/\bnewspaper\b/i, /\bmagazine\s+subscription\b/i, /\bnews\s+agency\b/i] },
 
   // Pest control, plumber, electrician, appliance repair, RO/water-purifier
   // service — generic keyword signals, none existed anywhere before this.
   { type: 'Expense', category: 'Household', sub_category: 'Home Services',
+    direction: 'debit',
     patterns: [
       /\bpest\s+control\b/i, /\bplumber\b/i, /\belectrician\b/i,
       /\bappliance\s+repair\b/i, /\bro\s+service\b/i, /\bwater\s+purifier\s+service\b/i,
@@ -649,17 +738,21 @@ const TAXONOMY: TaxonomyEntry[] = [
     ] },
 
   { type: 'Expense', category: 'Household', sub_category: 'Stationery',
+    direction: 'debit',
     patterns: [/\bstationers?\b/i, /\bstationery\b/i] },
 
   // ── Personal Care & Fitness (new categories, this pass) ───────────────────
   { type: 'Expense', category: 'Personal Care', sub_category: null,
+    direction: 'debit',
     patterns: [/\bsalon\b/i, /\bspa\b/i, /\bparlour\b/i, /\bbarber\b/i] },
 
   { type: 'Expense', category: 'Fitness & Gym', sub_category: null,
+    direction: 'debit',
     patterns: [/\bgym\b/i, /\bfitness\b/i, /\bcult\.?fit\b/i, /\byoga\s+class\b/i] },
 
   // ── Courier & Postal (new category, this pass) ────────────────────────────
   { type: 'Expense', category: 'Courier & Postal', sub_category: null,
+    direction: 'debit',
     patterns: [
       /\bdtdc\b/i, /\bblue\s*dart\b/i, /\bindia\s+post\b/i,
       /\bdelhivery\b/i, /\bekart\b/i, /\bxpressbees\b/i,
@@ -669,6 +762,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   // \btds\b bare is short but the surrounding banking-SMS context makes
   // false positives unlikely in practice.
   { type: 'Expense', category: 'Taxes & Government', sub_category: null,
+    direction: 'debit',
     patterns: [
       /\bincome\s+tax\b/i, /\bgst\s+payment\b/i, /\bproperty\s+tax\b/i,
       /\bmunicipal\s+tax\b/i, /\btraffic\s+challan\b/i, /\be-?challan\b/i,
@@ -681,9 +775,22 @@ const TAXONOMY: TaxonomyEntry[] = [
   // "subscription" without false-positiving on ordinary business names.
   // This list needs periodic manual maintenance as new services appear.
   { type: 'Expense', category: 'Subscriptions', sub_category: null,
+    direction: 'debit',
     patterns: [
       /\bspotify\b/i, /\byoutube\s+premium\b/i, /\bapple\s+(music|one|icloud)\b/i,
       /\bmicrosoft\s*365\b/i, /\bgoogle\s+(one|workspace|storage)\b/i,
+      // [ADD] Google Play / "Google India Digital Serv" — the actual
+      // merchant name banks show for Google Play Store purchases (app
+      // purchases, subscriptions billed through Play Store, etc.).
+      // Confirmed missing in real data: ₹3,655 and ₹3,731 debits to
+      // "Google India Digital Serv" via UPI landed as category: null
+      // because this entry only matched google+one/workspace/storage.
+      // Deliberately does NOT match bare "google pay" — that's a payment
+      // channel/app name (GPay), not a merchant, and would false-positive
+      // on completely unrelated UPI payments made "via Google Pay."
+      // "play" and "india digital" are distinct tokens from "pay", so no
+      // overlap risk.
+      /\bgoogle\s+(play|india\s+digital)\b/i,
       /\banthropic\b/i, /\bclaude\b/i, /\bopenai\b/i, /\bchatgpt\b/i,
       /\bcanva\b/i, /\bdropbox\b/i, /\bnotion\b/i, /\baws\b/i,
     ] },
@@ -696,12 +803,50 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\bach\s+(credit|cr)\b/i, /\bcorporate\s+credit\b/i,
       // [ADD] Employer NEFT salary credits not caught by \bsalary\b keyword.
       // "NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C"
-      /\bneft\s+cr\b/i,
+      //
+      // [FIX — this pass] Narrowed with a negative lookahead. Confirmed real
+      // false positive: "NEFT Cr-CIUB0000032-LIC INDIA D075-P N SRIDEVI..."
+      // — an LIC policy payout (maturity/bonus), not wages — was matching
+      // the bare phrase and getting labeled Monthly Salary. "NEFT Cr" is
+      // generic NEFT-credit narration used for insurance payouts, refunds,
+      // dividends, and vendor payments alike, not specific to payroll; on
+      // its own it's too weak a signal to decide Salary. The lookahead
+      // blocks the match when a clearly-non-employer term appears within
+      // the same narration segment, while leaving the original LOGITECH
+      // example (no such term nearby) matching exactly as before. This is
+      // a narrow patch for the one confirmed case, not a general solution —
+      // an employer name will always be open-ended and un-listable the same
+      // way merchant names are; the real fix is the same confidence-gating/
+      // custom_categories direction already discussed and deferred for
+      // that broader class of problem.
+      /\bneft\s+cr\b(?!.{0,60}?\b(?:lic|insurance|assurance|amc|mutual\s+fund|dividend|interest|refund)\b)/i,
     ] },
 
   { type: 'Income', category: 'Refunds', sub_category: 'Purchase Refund',
-    patterns: [/\brefund\b/i, /\bcashback\b/i, /\breversal\b/i,
-               /\bamount\s+reversed\b/i, /\brefunded\b/i] },
+    direction: 'credit',
+    patterns: [/\brefund\b/i, /\bcashback\b/i, /\brefunded\b/i] },
+
+  // [FIX — this pass] Split out of the Purchase Refund entry above.
+  // "reversal"/"reversed" was previously lumped in with "refund"/
+  // "cashback" under the same sub_category, but they're not the same
+  // event: a merchant refund is new money coming back after a purchase; a
+  // payment reversal is YOUR OWN money bouncing back because a transfer
+  // failed (e.g. "Ac XX0778 credited Rs.50000.00...for reversal of UPI
+  // txn" — confirmed real example, not a purchase refund at all).
+  // Conflating them overstates income/savings-rate by counting a failed
+  // send-then-return as if it were new money. Kept under the same
+  // top-level Refunds category (not a new one) so the existing
+  // runContraDetection() type==='Income' exclusion guard still applies —
+  // see the original comment this replaces for why that guard matters:
+  // an uncategorized reversal has type: null and isn't excluded by it,
+  // so it can get wrongly matched against the original failed debit as a
+  // "possible internal transfer". Distinguishing the sub_category doesn't
+  // change that protection, just makes it possible for downstream
+  // aggregates (e.g. health modules) to tell the two apart instead of
+  // reporting a reversal as if it were real refund income.
+  { type: 'Income', category: 'Refunds', sub_category: 'Payment Reversal',
+    direction: 'credit',
+    patterns: [/\breversal\b/i, /\bamount\s+reversed\b/i, /\breversed\b/i] },
 
   { type: 'Income', category: 'Passive Income', sub_category: 'Interest Income',
     direction: 'credit',
@@ -715,6 +860,24 @@ const TAXONOMY: TaxonomyEntry[] = [
     direction: 'credit',
     patterns: [/\bdividend\b/i] },
 
+  // [ADD — this pass] Income > Bank Deposit > Cheque. Confirmed real gap:
+  // "Update! INR 23,000.00 deposited...for CHQ DEP-CTS CLG2-CHENNAI RK
+  // SALAI - CTS.Avl bal...Cheque deposits in A/C are subject to clearing"
+  // landed uncategorized. Deliberately does NOT use a bare \bcheque\b
+  // pattern — verified against the real corpus that "Cheque deposits in
+  // A/C are subject to clearing" is generic footer boilerplate present on
+  // 41 different messages (NEFT/IB transfer credits etc.), not specific to
+  // actual cheque deposits — a bare pattern would have massively
+  // over-matched. \bchq\s*dep\b is the specific signal (CTS = Cheque
+  // Truncation System, the actual clearing-house code), confirmed to match
+  // only the one real cheque-deposit transaction in the corpus.
+  // sub_category explicitly labelled 'Cheque' rather than left null, per
+  // product request — otherwise there's no way to tell, just by looking at
+  // a transaction row, where this credit actually came from.
+  { type: 'Income', category: 'Bank Deposit', sub_category: 'Cheque',
+    direction: 'credit',
+    patterns: [/\bchq\s*dep\b/i, /\bcheque\s+deposit(?:ed)?\b/i] },
+
   // ── Investment ────────────────────────────────────────────────────────────
   { type: 'Investment', category: 'Mutual Funds', sub_category: 'SIP',
     // [FIX] \bsip\b → requires qualifying context word.
@@ -725,7 +888,17 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\bsystematic\s+investment\s+plan\b/i,
     ] },
 
+  // [FIX — this pass] direction: 'debit' added. Real data showed a Zerodha
+  // "quarterly settlement payout" credit (unused margin returned to the
+  // user, not a stock trade) matching this bare merchant-name pattern and
+  // getting tagged as Investment > Stocks > Equity Purchase with a
+  // POSITIVE amount — self-contradictory, since a "purchase" by definition
+  // costs money. A genuine equity purchase is always a debit; a credit
+  // from a broker is a settlement, withdrawal, or dividend (dividends are
+  // already separately handled by the Income > Dividends entry above).
+  // Same root-cause class as the PPF/SSY direction fix above.
   { type: 'Investment', category: 'Stocks', sub_category: 'Equity Purchase',
+    direction: 'debit',
     patterns: [/\bzerodha\b/i, /\bgroww\b/i, /\bupstox\b/i,
                /\bangelone\b/i, /\bangel\s+one\b/i, /\bdhan\b/i] },
 
@@ -735,6 +908,25 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\bsafegold\b/i, /\bdigital\s+gold\b/i, /\bpaytm\s+gold\b/i,
       /\bsovereign\s+gold\s+bond\b/i, /\bgold\s+bond\b/i,
     ] },
+
+  // [ADD — this pass] Investment > Bonds — new category, not previously in
+  // TAXONOMY. Verified /\bbond\b/i clean against every real merchant name
+  // across both users except the one it's meant to catch (a NetBanking
+  // payment to "CSHFREINDIABONDPRIVA" — Cashfree India Bond Private — which
+  // needs the merchant-scoped loose-match pass above, since "bond" has no
+  // word boundary inside that glued merchant string). Does not conflict
+  // with the more specific "sovereign gold bond"/"gold bond" patterns above
+  // — those score higher (2 pattern hits vs. 1) for an actual gold-bond
+  // purchase, so Gold still wins that scoring comparison as it should.
+  //
+  // [REQUIRED COMPANION CHANGE] 'Bonds' must also be added to
+  // transactionCategories.ts's TAXONOMY.Investment array (with a
+  // subCategories: ['Bond Purchase'] entry) or transactions in this
+  // category will render as "Uncategorized" in the UI despite being
+  // correctly classified here — the exact three-way taxonomy mismatch
+  // documented at the top of transactionCategories.ts.
+  { type: 'Investment', category: 'Bonds', sub_category: 'Bond Purchase',
+    patterns: [/\bbond\b/i] },
 
   // [FIX] Removed \bbajaj\s+finserv\b — Bajaj Finserv is primarily EMI/lending.
   // Bajaj Allianz kept (insurance-only entity, unambiguous).
@@ -793,7 +985,20 @@ const TAXONOMY: TaxonomyEntry[] = [
   // we can see from this file — if Layer 2 never sets matched_rule to
   // GENERIC_PPF_SSY, this at least gets the transaction categorized instead
   // of falling through uncategorized.
+  // [FIX — this pass] direction: 'debit' added. Without it, an incoming
+  // transfer whose narration happens to say "PPF" (real example: a
+  // person's own transfers, some captioned "PPF", others "House expenses",
+  // same person/amount, only the PPF-captioned ones were affected) got
+  // classified as if the money arriving WAS a PPF asset. PPF/SSY is only
+  // ever a real asset-classification event when money is actually moving
+  // OUT to the scheme, never on the credit side — an incoming credit that
+  // happens to mention PPF is not itself a contribution. Matters beyond
+  // mislabeling: health-module risk/liquidity scoring reads this
+  // category, so an unrestricted credit match double-counts the same PPF
+  // contribution (once when it arrives from wherever, again when it's
+  // actually moved into PPF).
   { type: 'Asset', category: 'Government Schemes', sub_category: 'PPF/SSY',
+    direction: 'debit',
     patterns: [
       /\bppf\b/i, /\bpublic\s+provident\s+fund\b/i,
       /\bsukanya\s+samriddhi\b/i, /\bssy\b/i,
@@ -857,7 +1062,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     const isCredit = l2.direction === 'credit';
     const classification = l2.suggested_category
       ? parseSuggestedCategory(l2.suggested_category)
-      : classify(body.toLowerCase(), isCredit, l2.amount, l2.channel);
+      : classify(body.toLowerCase(), isCredit, l2.amount, l2.channel, l2.merchant);
 
     const signedAmount = isCredit ? Math.abs(l2.amount) : -Math.abs(l2.amount);
 
@@ -931,7 +1136,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
   }
 
-  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel);
+  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel, extracted.merchant);
 
   if (!classification) {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
@@ -1172,18 +1377,111 @@ function extractRefNumber(body: string): Pick<ExtractedFields, 'ref_number' | 'r
 
 // ─── Taxonomy classifier ──────────────────────────────────────────────────────
 
+// [FIX — this pass] Every pattern in TAXONOMY is \b-bounded, which only ever
+// matches merchant names embedded in naturally spaced bank text ("To ADYAR
+// ANANDA BHAVAN SWEET On..."). It structurally cannot match the same real
+// merchant when a different SMS template glues the name together with no
+// separators (UPI-handle / POS-terminal style: "At adyaranandabhavanswe.6325
+// by UPI...") — "bhavan" has word characters on both sides there, so no \b
+// transition exists, no matter how many merchant strings get added to the
+// list. Confirmed on 988 real transactions across two users: the same real
+// merchant (Amazon, Google Play, Decathlon, Adyar Ananda Bhavan, Aakash
+// Hospital...) classifies correctly under one SMS template and silently
+// falls through to unclassified under the other, purely because of spacing.
+//
+// Fix: a second pass, scoped ONLY to the isolated merchant field (never the
+// full body), tests a boundary-stripped ("loose") version of the same
+// pattern against a space-stripped merchant string. Scoping to merchant-only
+// — not the whole message — is deliberate and load-bearing: an earlier
+// version of this fix tested loosened patterns against the whole body and
+// caused real regressions (e.g. /\brefund\b/i, boundary-stripped, became a
+// bare substring match that also fired on "refunded" — a word the taxonomy
+// deliberately keeps as a separate pattern — double-counting one narrative
+// word as two pattern hits and flipping an already-correct classification).
+// Narrative/context patterns (refund, refunded, salary, meal, dining...)
+// only ever run against the properly-spaced full body, exactly as before.
+// Only patterns representing merchant-identity keywords get the loose
+// merchant-only pass, and only when the normal pass already failed.
+//
+// LOOSE_MATCH_DENYLIST — patterns unsafe to loosen even scoped to merchant-
+// only: complete standalone short brand tokens that are also common Indian
+// name/word roots (e.g. "dhan" — the Dhan trading app — is a common root in
+// names like Dhanalakshmi, Dhanush; boundary-stripped it false-matched real
+// unrelated person/store names in live data). Verified by testing every
+// pattern in TAXONOMY against every real unclassified merchant/person name
+// across two independent users' full transaction history — this was the
+// only genuine collision found. Re-run that same check before trusting any
+// newly-added pattern; add to this set if it turns up another one.
+// [FIX — this pass] Added \bspa\b. Confirmed real bug: boundary-stripped,
+// "spa" substring-matches inside "yespay" (the bank-domain suffix on
+// flipkart.hypg@yespay), mislabeling genuine Flipkart refund credits as
+// "Personal Care". Same collision class as the existing "dhan" entry —
+// a short, common-letter-sequence pattern that reads fine word-bounded
+// but false-positives constantly once boundaries are stripped.
+const LOOSE_MATCH_DENYLIST = new Set<string>([
+  '\\bdhan\\b',
+  '\\bspa\\b',
+]);
+
+// [ADD — this pass] General safeguard alongside the denylist above, for
+// the same bug class rather than one more entry per incident. Checked
+// against every real merchant string in the corpus: every pattern with a
+// stripped alnum core of 3 characters or fewer that WAS needed via loose
+// matching (i.e. didn't already match directly on the full message body)
+// turned out to be an accidental collision ("spa" in "yespay") — while
+// every pattern of 4+ characters that loose-matched turned out to be a
+// genuine hit (e.g. "bond" inside a glued "...INDIABONDPRIVA..." payee
+// name — a real bonds platform, correctly identified). A flat length
+// floor isn't a perfect substitute for actually checking real data before
+// trusting a new pattern, but it closes off the specific risk class that
+// caused the "spa" bug automatically, for every future pattern, without
+// waiting for it to mislabel a real transaction first.
+const MIN_LOOSE_MATCH_CORE_LENGTH = 4;
+
+function looseCoreLength(pattern: RegExp): number {
+  return pattern.source.replace(/[^a-zA-Z0-9]/g, '').length;
+}
+
+const looseVariantCache = new WeakMap<RegExp, RegExp>();
+
+function toLooseVariant(pattern: RegExp): RegExp {
+  const cached = looseVariantCache.get(pattern);
+  if (cached) return cached;
+  // Drop \b anchors (no boundaries exist in a glued string) and \s+/\s*
+  // (no separators exist either), so the same keyword still matches once
+  // merchant text has been fused together by the SMS template.
+  const looseSource = pattern.source
+    .replace(/\\b/g, '')
+    .replace(/\\s\+/g, '')
+    .replace(/\\s\*/g, '');
+  const loose = new RegExp(looseSource, pattern.flags);
+  looseVariantCache.set(pattern, loose);
+  return loose;
+}
+
+function toNoSpaceMerchant(merchant: string | null | undefined): string {
+  if (!merchant) return '';
+  return merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 // [FIX — this pass] Added optional `channel` param, used only for the NACH
 // fallback below. Every existing call site is updated to pass it through
 // (l2.channel or extracted.channel) — behaviour for every other message is
 // unchanged, since the fallback only triggers when channel === 'NACH' AND
 // no text pattern matched anything.
+//
+// [FIX — this pass] Added optional `merchant` param, used only for the
+// merchant-scoped loose-match fallback described above. Every existing call
+// site is updated to pass it through (l2.merchant or extracted.merchant).
 function classify(
   bodyLower: string,
   isCredit: boolean,
   amount: number,
   channel?: string | null,
+  merchant?: string | null,
 ): Classification | null {
   const direction = isCredit ? 'credit' : 'debit';
+  const merchantNoSpace = toNoSpaceMerchant(merchant);
   let bestEntry: TaxonomyEntry | null = null;
   let bestScore = 0;
 
@@ -1191,7 +1489,12 @@ function classify(
     if (entry.direction && entry.direction !== direction) continue;
     if (entry.maxAmount !== undefined && amount > entry.maxAmount) continue;
     if (entry.minAmount !== undefined && amount < entry.minAmount) continue;
-    const score = entry.patterns.filter(p => p.test(bodyLower)).length;
+    const score = entry.patterns.filter(p => {
+      if (p.test(bodyLower)) return true;
+      if (!merchantNoSpace || LOOSE_MATCH_DENYLIST.has(p.source)) return false;
+      if (looseCoreLength(p) < MIN_LOOSE_MATCH_CORE_LENGTH) return false;
+      return toLooseVariant(p).test(merchantNoSpace);
+    }).length;
     if (score > bestScore) { bestScore = score; bestEntry = entry; }
   }
 

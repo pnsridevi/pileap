@@ -37,8 +37,17 @@ import {
 export interface TransactionRowData {
   id: string;
   txn_date: string;           // 'YYYY-MM-DD'
-  amount: number;             // always positive; direction comes from `type`
-  type: 'debit' | 'credit';
+  // [FIX] Was `number`. `null` = a declined/failed-transaction placeholder
+  // (buildDiscarded in smsParser.ts — amount was never captured because the
+  // transaction itself never completed). Always positive when non-null;
+  // direction comes from `type`.
+  amount: number | null;
+  // [FIX] Added 'declined' — was 'debit' | 'credit' only, which forced
+  // mapTransactionToRow() to call Math.abs(null) and coerce a declined
+  // transaction's amount to 0, then classify it as 'credit' (null < 0 is
+  // false) — rendering it as a green "+₹0.00", i.e. fake incoming money.
+  // See mapTransactionToRow() below and its render branch in TransactionRow.
+  type: 'debit' | 'credit' | 'declined';
   category: string | null;
   sub_category: string | null;
   merchant: string | null;
@@ -56,11 +65,16 @@ export interface TransactionRowData {
  * display shape this component expects. Put here rather than in the DB
  * layer — this is a view concern, not a data-fetching one. */
 export function mapTransactionToRow(txn: Transaction): TransactionRowData {
+  // [FIX] txn.amount is genuinely `number | null` at runtime (declined-
+  // transaction placeholders — see the Transaction type fix in
+  // transactions.ts). Check for null BEFORE calling Math.abs()/comparing
+  // with `<`, instead of letting JS silently coerce null to 0.
+  const isDeclined = txn.amount === null;
   return {
     id: txn.id,
     txn_date: txn.txn_date,
-    amount: Math.abs(txn.amount),
-    type: txn.amount < 0 ? 'debit' : 'credit',
+    amount: isDeclined ? null : Math.abs(txn.amount as number),
+    type: isDeclined ? 'declined' : (txn.amount as number) < 0 ? 'debit' : 'credit',
     category: txn.category,
     sub_category: txn.sub_category,
     merchant: txn.merchant,
@@ -177,13 +191,20 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
   const category = getCategory(txn.category);
   const needsTransferConfirmation = !!txn.possible_contra_of && !txn.is_contra;
 
+  // [FIX] Added the 'declined' branch — previously `type` could only be
+  // 'debit'/'credit', so a declined transaction (amount: null) fell through
+  // to the 'debit' color/prefix behavior by accident of `!== 'credit'`,
+  // AFTER already being miscategorized as 'credit' upstream in
+  // mapTransactionToRow's old Math.abs(null)/`null < 0` logic. Now explicit.
   const amountColor = txn.is_contra
     ? colors.muted
     : txn.type === 'credit'
     ? colors.green
+    : txn.type === 'declined'
+    ? colors.muted
     : colors.dark;
 
-  const amountPrefix = txn.type === 'credit' ? '+ ' : '− ';
+  const amountPrefix = txn.type === 'credit' ? '+ ' : txn.type === 'declined' ? '' : '− ';
 
   return (
     <View>
@@ -199,7 +220,13 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
           )}
 
           <Text style={styles.merchant} numberOfLines={1}>
-            {txn.merchant ?? category.label}
+            {/* [FIX] txn.merchant is also null on declined rows (nothing to
+                extract from a failed-transaction SMS), so this used to fall
+                through to category.label — which is ALSO null here, landing
+                on getCategory()'s default label ("Uncategorized"). That's
+                why every declined row in the same batch rendered as an
+                identical, indistinguishable "Uncategorized" title. */}
+            {txn.merchant ?? (txn.type === 'declined' ? 'Payment declined' : category.label)}
           </Text>
 
           <View style={styles.metaRow}>
@@ -225,8 +252,12 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
 
         <View style={styles.rightCol}>
           <Text style={[styles.amount, { color: amountColor }]}>
-            {amountPrefix}
-            {formatAmount(txn.amount)}
+            {/* [FIX] Was `formatAmount(txn.amount)` unconditionally — threw
+                nothing (JS is permissive) but formatAmount(null) would have
+                produced "₹NaN" once amount could no longer silently be 0
+                from mapTransactionToRow. txn.amount is genuinely null here
+                for declined rows, so branch instead of formatting it. */}
+            {txn.amount === null ? 'Declined' : `${amountPrefix}${formatAmount(txn.amount)}`}
           </Text>
 
           {isEdited ? (

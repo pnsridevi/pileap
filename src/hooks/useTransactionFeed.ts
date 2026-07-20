@@ -4,11 +4,23 @@
  * Wraps fetchTransactions() with pagination (20/page, matches the demo),
  * pull-to-refresh, and infinite scroll. Re-fetches from page 0 whenever the
  * user changes tab/status/category filters in transactionStore.
+ *
+ * [FIX] fetchTransactions() returns raw `Transaction[]` rows straight from
+ * the DB — `type` there is 'Expense' | 'Income' | 'Investment' | 'Liability'
+ * | 'Asset' | null, and `amount` is the signed DB value. TransactionRowData
+ * (what TransactionRow.tsx actually renders) expects `type: 'debit' |
+ * 'credit' | 'declined'` and an absolute-value `amount`, with declined
+ * handled as its own case. Those two shapes don't overlap — the previous
+ * version force-cast raw rows straight into TransactionRowData with `as`,
+ * which TypeScript correctly rejected (TS2352). Fixed by running every
+ * fetched row through mapTransactionToRow() — the existing helper built
+ * for exactly this translation — before it ever enters state.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchTransactions } from '@/lib/api/transactions';
 import type { TransactionFilters } from '@/lib/api/transactions';
 import { useTransactionStore } from '@/store/transactionStore';
+import { mapTransactionToRow } from '@/components/transactions/TransactionRow';
 import type { TransactionRowData } from '@/components/transactions/TransactionRow';
 
 const PAGE_SIZE = 20;
@@ -74,9 +86,13 @@ export function useTransactionFeed(): UseTransactionFeedResult {
       const { transactions: rows, totalCount: count } = await fetchTransactions(buildFilters(targetPage));
       if (requestId !== requestIdRef.current) return; // a newer request already superseded this one
 
+      // [FIX] Translate raw DB rows into the display shape TransactionRow
+      // actually expects, instead of force-casting one into the other.
+      const mapped = rows.map(mapTransactionToRow);
+
       setTotalCount(count);
       setPage(targetPage);
-      setTransactions(prev => (mode === 'more' ? [...prev, ...rows as TransactionRowData[]] : rows as TransactionRowData[]));
+      setTransactions(prev => (mode === 'more' ? [...prev, ...mapped] : mapped));
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
       setError(e instanceof Error ? e.message : String(e));

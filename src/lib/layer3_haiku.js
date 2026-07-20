@@ -1,139 +1,116 @@
 /**
- * LAYER 3 — Claude Haiku Structured Extraction Prompt
+ * layer3/haiku.js
  *
- * Called only for messages that:
- *   1. Passed the Layer 1 Kotlin filter (definitely looks financial)
- *   2. Did NOT match any Layer 2 regex rule (unknown format / new bank)
+ * Layer 3 fallback — calls Claude Haiku to classify SMS that Layer 2's
+ * regex ruleset couldn't match. pipeline_test.js requires this file
+ * unconditionally at the top (`require('../layer3/haiku')`), so this file
+ * must always exist and load cleanly even when --haiku isn't passed;
+ * callHaiku() itself only needs to actually work when it's called.
  *
- * Each call is completely stateless. One SMS in, one JSON object out.
- * No conversation history. System prompt under 800 tokens.
+ * SCOPE (per product decision): this is ONLY for messages Layer 2's
+ * regex ruleset genuinely can't classify — new or unrecognized bank/
+ * vendor SMS templates. It is deliberately NOT used for the vendor-
+ * payout-notice / bank-confirmation reconciliation logic (see
+ * VENDOR_SETTLEMENT_NOTICE / PROVISIONAL_CREDIT_NOTICE in ruleset.js and
+ * the reconciliation functions in transactions.ts) — that stays fully
+ * deterministic, no LLM judgment call involved. Haiku's only job is the
+ * narrower one: "I don't recognize this template at all, what is it."
  *
- * The model is instructed to return null for promotional messages that
- * slipped past Layer 1. This is the final promotional safety net.
+ * Return shape (consumed by pipeline_test.js and, eventually, whatever
+ * backend worker processes the parse_jobs queue — see note at the bottom
+ * of this file, that worker doesn't exist in what's been shared so far):
+ *   {
+ *     is_promotional: boolean,
+ *     direction: 'credit' | 'debit' | null,
+ *     amount: number | null,
+ *     merchant: string | null,
+ *     confidence: number | null,
+ *   }
  */
 
-const SYSTEM_PROMPT = `You are a financial SMS parser for Indian bank messages. Extract structured data from a single SMS and return ONLY a JSON object. No explanation, no markdown, no preamble.
+const USE_REAL_HAIKU = !!process.env.ANTHROPIC_API_KEY;
 
-TAXONOMY — classify into exactly these:
-type / category / sub_category (sub_category may be null)
+// Kept narrow and explicit on purpose: this prompt should only ever be
+// asked to do what Layer 2 already couldn't — classify a message it has
+// never seen a template for. It is NOT asked to make judgment calls Layer
+// 2 handles deterministically (promotional-sender filtering by TRAI
+// suffix, duplicate detection, NACH/mandate handling, vendor-notice
+// reconciliation) — all of that stays in ruleset.js/transactions.ts.
+const SYSTEM_PROMPT = `You classify Indian bank and financial-vendor SMS messages that a regex-based parser could not match against any known template. You are only ever called on messages that already failed every existing rule — your job is narrow: figure out what this specific, unrecognized message is.
 
-Expense:
-  Food | Restaurant, Quick Commerce, Groceries, Cafe, null
-  Travel | Fuel, Cab, Auto, Metro, Bus, Train, Flight, null
-  Shopping | Online Shopping, Clothing, Electronics, Books, null
-  Utilities | Electricity, Water, Gas, Internet, Mobile Recharge, null
-  Housing | Rent, Maintenance, null
-  Medical | Pharmacy, Hospital, Lab, null
-  Entertainment | OTT, Movies, Events, null
-  Education | Fees, Books, Courses, null
-  Other Expense | Gift, Bill Split, null
+Determine:
+1. Is this promotional, an OTP, or other non-transactional noise that should have been filtered before reaching you?
+2. If it describes a real or promised movement of money: the direction (credit = money to the user, debit = money from the user), the amount in rupees, and the merchant or counterparty name if identifiable from the text.
 
-Income:
-  Salary | Monthly Salary, null
-  Consulting Fee | null
-  Rental Income | null
-  Business Income | null
-  Other Income | Refund, Cashback, Reimbursement, Reversal, null
-
-Investment:
-  Mutual Fund | SIP, Lumpsum, Redemption, null
-  Equity | Buy, Sell, null
-  Gold | null
-  Fixed Deposit | New FD, Maturity, null
-
-Liability:
-  Home Loan EMI | null
-  Credit Card EMI | null
-  Personal Loan EMI | null
-  Other Loan EMI | NACH Debit, null
-
-Insurance:
-  Insurance Premium | Life, Health, Travel, Vehicle, null
-
-RULES:
-- direction: "credit" (money received) or "debit" (money sent/paid)
-- amount: always positive number regardless of direction
-- account_number_masked: last 4 digits only, null if not present
-- txn_date: YYYY-MM-DD, null if not found
-- merchant: counterparty name as it appears in SMS, null if unclear
-- ref_number: UPI RRN (12 digits) or NEFT UTR (alphanumeric). null if absent or unclear.
-- ref_type: "upi_rrn" | "neft_utr" | null
-- vpa: full UPI VPA string if present (e.g. "name@okhdfc"), null otherwise
-- vpa_type: "person" | "merchant" | null (person = individual's UPI ID, merchant = business)
-- confidence: 0.0-1.0 based on how clearly all fields extracted
-- requires_classification: true if merchant is a person (user must classify)
-- possible_contra: true if this looks like an internal account transfer
-- is_promotional: true if this is a marketing/offer message, not a real transaction
-
-CLASSIFICATION HINTS:
-- "Sent Rs.X to [NAME]" from HDFC = debit, merchant = NAME
-- "Credit Alert" from VPA [name@bank] = credit, check if VPA is person or merchant
-- Person VPA pattern: firstname.lastname@bank, phonenumber@bank → vpa_type: "person", requires_classification: true
-- Merchant VPA: flipkart@, swiggy@, irctc@, zerodha@, etc. → vpa_type: "merchant"
-- "IB FUNDS TRANSFER" = internal bank transfer → possible_contra: true
-- "INDIAN CLEARING CORP" UMRN = NACH mandate = EMI or insurance
-- "Reversal" or "reversed" = refund/credit
-- "Declined" = NOT a real transaction → return { "is_promotional": true } to discard
-- Kotak/Airtel promotional offers with URLs = NOT transactions → return { "is_promotional": true }
-- Amount-only with no account and no direction verb = NOT a transaction → { "is_promotional": true }
-
-Return ONLY this JSON (no other text):
+Respond with ONLY a JSON object — no markdown fences, no other text:
 {
-  "is_promotional": false,
-  "direction": "debit"|"credit",
-  "amount": number,
-  "type": string,
-  "category": string,
-  "sub_category": string|null,
-  "merchant": string|null,
-  "account_number_masked": string|null,
-  "txn_date": string|null,
-  "ref_number": string|null,
-  "ref_type": string|null,
-  "vpa": string|null,
-  "vpa_type": string|null,
-  "confidence": number,
-  "requires_classification": boolean,
-  "possible_contra": boolean,
-  "bank": string|null
+  "is_promotional": boolean,
+  "direction": "credit" | "debit" | null,
+  "amount": number | null,
+  "merchant": string | null,
+  "confidence": number
 }
 
-If promotional or cannot determine direction+amount, return:
-{ "is_promotional": true }`;
+"confidence" is your own confidence in this classification, from 0 to 1.
+If you cannot confidently determine the amount or direction, return null for that field rather than guessing — a human reviews the original message either way (this always routes to pending_review), so a null is safer than a wrong number.`;
 
-/**
- * Calls Haiku with a single SMS body.
- * Returns parsed JSON or null on failure.
- */
-async function callHaiku(smsBody) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5',
-      max_tokens: 400, // JSON output is small — cap tightly to control cost
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: smsBody }]
-    })
+async function callHaiku(body) {
+  if (!USE_REAL_HAIKU) {
+    throw new Error(
+      'callHaiku() was invoked but ANTHROPIC_API_KEY is not set. ' +
+      'Either set the env var, or don\'t pass --haiku.'
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  const msg = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: body }],
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Haiku API error ${response.status}: ${err}`);
-  }
+  const text = msg.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
 
-  const data = await response.json();
-  const text = data.content?.[0]?.text?.trim();
-  if (!text) return null;
+  // Defensive: models occasionally wrap JSON in fences despite instructions
+  // not to. Strip them before parsing rather than failing on a technicality.
+  const cleaned = text.replace(/```json|```/g, '').trim();
 
+  let parsed;
   try {
-    // Strip any accidental markdown fences
-    const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    return JSON.parse(clean);
-  } catch {
-    console.error('Haiku JSON parse failed:', text);
-    return null;
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error(`callHaiku() got a non-JSON response from Haiku: ${text.slice(0, 200)}`);
   }
+
+  // Validate/coerce rather than trusting the model's output shape blindly —
+  // a malformed field here should degrade to null (safe, routes to human
+  // review), not silently propagate a wrong type into the pipeline.
+  return {
+    is_promotional: !!parsed.is_promotional,
+    direction: (parsed.direction === 'credit' || parsed.direction === 'debit') ? parsed.direction : null,
+    amount: (typeof parsed.amount === 'number' && !isNaN(parsed.amount)) ? parsed.amount : null,
+    merchant: (typeof parsed.merchant === 'string' && parsed.merchant.trim()) ? parsed.merchant.trim() : null,
+    confidence: (typeof parsed.confidence === 'number' && !isNaN(parsed.confidence)) ? parsed.confidence : null,
+  };
 }
 
-module.exports = { callHaiku, SYSTEM_PROMPT };
+module.exports = { callHaiku };
+
+// ─── STILL OPEN — not addressed by this file alone ─────────────────────────
+// The actual caller (the backend worker that reads the parse_jobs queue and
+// invokes callHaiku() per smsParser.ts's own header comment: "The backend
+// Haiku worker picks these up from the parse_jobs queue after they are
+// uploaded") has not been shared and doesn't appear to exist in what's been
+// provided so far. Filling in this function makes --haiku usable from
+// pipeline_test.js/comparison_test.js (the test harnesses that already
+// import it), but does NOT wire Haiku into the real production pipeline —
+// that worker still needs to be written, including its own decisions on
+// per-message vs. batched calls, retry/timeout handling, and cost caps —
+// none of which this file makes on its own.  

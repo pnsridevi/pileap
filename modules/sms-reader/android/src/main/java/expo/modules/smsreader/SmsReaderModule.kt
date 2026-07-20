@@ -298,9 +298,17 @@ class SmsReaderModule : Module() {
     // either. The message was invisible to every downstream check. Confirmed
     // 100% of whole-rupee "You paid RsX..." messages were silently dropped
     // here before this fix. Added a direct "rs" + digit check.
+    // [ADD] "Amt 235 will be refunded..." — whole-rupee amount stated via
+    // "Amt" with no "Rs."/"INR" token and no decimal point at all, so it
+    // matched none of the markers above either. Confirmed: 5 of 11 real
+    // IRCTC refund messages in a real device export used this exact form
+    // and had no currency signal at all as a result — same failure shape
+    // as the fix just above, different missing token. Generic "amt" +
+    // digit check, not IRCTC-specific.
     val hasCurrencyMarker = b.contains("rs.") || b.contains("rs ") ||
                             b.contains("inr") || b.contains("₹") ||
-                            Regex("""rs\d""").containsMatchIn(b)
+                            Regex("""rs\d""").containsMatchIn(b) ||
+                            Regex("""\bamt\.?\s*\d""", RegexOption.IGNORE_CASE).containsMatchIn(b)
     if (!hasCurrencyMarker) {
       if (b.contains("out for delivery") ||
           b.contains("shipment") ||
@@ -331,20 +339,27 @@ class SmsReaderModule : Module() {
       return false
     }
 
-    // ── 4. Drop future credit / refund notices ────────────────────────────────
-    // Money has NOT moved. Actual credit arrives as a separate bank SMS.
-    // [FIX] Was a literal .contains("will be credited") — breaks on
-    // line-wrapped SMS ("will be\ncredited"), which real bank messages do.
-    // Confirmed: an insurance maturity notice for Rs.713,954.55 (money not
-    // due until a future date) slipped through this exact way and was
-    // recorded as a completed credit today. Regex tolerates any whitespace
-    // (including newlines) between the words instead of requiring them
-    // contiguous on one line.
-    if (Regex("""will\s+be\s+credited""", RegexOption.IGNORE_CASE).containsMatchIn(body) ||
-        Regex("""will\s+be\s+processed""", RegexOption.IGNORE_CASE).containsMatchIn(body) ||
-        Regex("""will\s+be\s+refunded""", RegexOption.IGNORE_CASE).containsMatchIn(body)) {
-      return false
-    }
+    // ── 4. Future credit / refund notices ──────────────────────────────────────
+    // [CHANGED] This used to hard-drop these messages outright (money hasn't
+    // moved yet; actual credit expected as a separate later bank SMS). That
+    // was safe as long as this phrasing only covered rare, non-actionable
+    // cases like a distant insurance maturity date. Real data shows it also
+    // covers near-term, concrete promises that genuinely need tracking: 11
+    // real IRCTC refund messages ("Amt 375.36 will be refunded within 3-4
+    // days... -IRCTC") were being silently and permanently dropped by this
+    // exact rule, with no way to ever reconcile them against the bank
+    // credit that follows days later.
+    // No longer dropped here — these now pass through to Layer 2, where a
+    // dedicated rule (PROVISIONAL_CREDIT_NOTICE in ruleset.js) intercepts
+    // "will be credited/refunded/processed" BEFORE GENERIC_CREDIT's bare
+    // \bcredited\b/\brefunded\b patterns can wrongly treat these as a
+    // completed transaction — that interception is what now prevents the
+    // original insurance-maturity regression, in place of the outright drop
+    // that used to sit here. See PROVISIONAL_CREDIT_NOTICE and the
+    // reconciliation logic in transactions.ts for the full flow: these
+    // create a flagged, pending_review placeholder that gets automatically
+    // hidden (is_deleted) once a matching real bank credit is later
+    // ingested — so only the real credit ends up visible to the user.
 
     // ── 5. Drop loyalty points — not real money ───────────────────────────────
     // [FIX] Was matching "credited...-Rewards Team" — the loyalty-points check
@@ -580,7 +595,34 @@ class SmsReaderModule : Module() {
       // after hasCurrencySignal is already required to be true, a bare
       // "failed" is safe here — non-financial messages like "KYC failed" or
       // "biometric auth failed" essentially never carry a Rs./INR amount.
-      b.contains("failed")
+      b.contains("failed")           ||
+      // [ADD] Vendor/broker settlement & payout language. Confirmed gap: a
+      // real Zerodha quarterly settlement SMS ("Your quarterly settlement
+      // payout for Rs.83.24... is processed... You should see the funds in
+      // your bank account within 24 hours") matched none of the signals
+      // above and was dropped as no_signal — permanently, since a Layer 1
+      // false negative can't be recovered downstream. Unlike step 4's
+      // future_credit drop just above (explicit "will be
+      // credited/processed/refunded" — money NOT yet moved, "actual credit
+      // arrives as a separate bank SMS"), this phrasing describes a
+      // settlement that has ALREADY happened ("is processed", not "will be
+      // processed") and — per real device data — sometimes has NO separate
+      // bank-side confirmation SMS at all for small broker/vendor
+      // settlements, so step 4's assumption doesn't hold for this class.
+      // Generic by construction: keyed on structural vendor-settlement
+      // vocabulary, not on "Zerodha" or any named sender — applies equally
+      // to Groww/Upstox/any payout source, any user. Safe to add broadly
+      // here because, like every other entry in this block, it only fires
+      // after hasCurrencySignal is already required to be true. Downstream,
+      // Layer 2 does not yet have a rule that positively recognizes this
+      // pattern as a confirmed transaction — it will fall through to the
+      // taxonomy fallback / Haiku escalation path and land in
+      // pending_review, which is the correct, safe landing spot until the
+      // dedicated Layer 2 rule + bank-confirmation reconciliation check are
+      // built (next step).
+      b.contains("processed")        ||
+      b.contains("settlement")       ||
+      b.contains("payout")
 
     if (!hasCurrencySignal || !hasDirectionSignal) return false
 

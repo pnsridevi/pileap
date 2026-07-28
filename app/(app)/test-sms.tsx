@@ -8,40 +8,34 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { colors, spacing, fontSize, fontWeight, radius } from '@/constants/theme';
 import { SmsReader, SmsMessage } from '../../modules/sms-reader/src/index';
-import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate } from '@/lib/smsParser';
+import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext } from '@/lib/smsParser';
 import { ingestParsedMessages, IngestResult } from '@/lib/api/transactions';
+import { fetchActiveRegisteredFacts } from '@/lib/api/registeredFacts';
+import { fetchCustomCategories } from '@/lib/api/customCategories';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
-type Mode = 'filtered' | 'debug' | 'parsed';
 
 const DATE_WINDOWS = [
   { label: '0 → 90 days',    fromDays: 0,   toDays: 90  },
   { label: '90 → 180 days',  fromDays: 90,  toDays: 180 },
-  { label: '180 → 270 days', fromDays: 180, toDays: 270 },
-  { label: '270 → 360 days', fromDays: 270, toDays: 360 },
 ];
 
 export default function TestSmsScreen() {
   const [status, setStatus]             = useState<Status>('idle');
-  const [messages, setMessages]         = useState<SmsMessage[]>([]);
-  const [senders, setSenders]           = useState<string[]>([]);
   const [parsed, setParsed]             = useState<ParsedTransaction[]>([]);
   const [balanceUpdates, setBalanceUpdates] = useState<BalanceUpdate[]>([]);
   const [rawMsgs, setRawMsgs]           = useState<SmsMessage[]>([]);
   const [error, setError]               = useState<string | null>(null);
   const [hasPerm, setHasPerm]           = useState<boolean | null>(null);
-  const [mode, setMode]                 = useState<Mode>('filtered');
-  const [rawCount, setRawCount]         = useState<number | null>(null);
   const [activeWindow, setActiveWindow] = useState<string | null>(null);
-  // [ADD] ingestParsedMessages() needs the ORIGINAL (ParsedTransaction |
-  // BalanceUpdate)[] union — `parsed` and `balanceUpdates` above were split
-  // apart purely for display purposes and can't be recombined losslessly
-  // (order doesn't matter for ingest, but keeping a single source of truth
-  // avoids ever having to reconstruct it). Kept separate from `parsed` so
-  // fixing the earlier type error didn't require touching this at all.
   const [rawParseResults, setRawParseResults] = useState<(ParsedTransaction | BalanceUpdate)[]>([]);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
   const [syncResult, setSyncResult] = useState<IngestResult | null>(null);
+  // [ADD] Surfaced purely for the debug screen's own visibility — shows how
+  // many registered_facts/custom_categories were actually fetched and used
+  // for this parse run, so a "why didn't this match" question during
+  // testing has an immediate answer instead of requiring a DB query.
+  const [matchContextInfo, setMatchContextInfo] = useState<{ facts: number; customCats: number } | null>(null);
 
   async function requestPermission() {
     if (Platform.OS !== 'android') { setError('SMS reading is Android only.'); return; }
@@ -63,53 +57,49 @@ export default function TestSmsScreen() {
     }
   }
 
-  async function fetchFiltered() {
-    if (!hasPerm) { await requestPermission(); return; }
-    setMode('filtered'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
-    setRawCount(null); setActiveWindow(null);
-    try {
-      const result = await SmsReader.getMessages(0, 90);
-      setMessages(result);
-      setStatus('done');
-    } catch (e: any) { setError(e.message ?? 'Unknown error'); setStatus('error'); }
-  }
-
-  async function fetchDebug() {
-    if (!hasPerm) { await requestPermission(); return; }
-    setMode('debug'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
-    setRawCount(null); setActiveWindow(null);
-    try {
-      const result = await SmsReader.getAllSenders();
-      setRawCount(result.totalCount);
-      setSenders(result.senders);
-      setStatus('done');
-    } catch (e: any) { setError(e.message ?? 'Unknown error'); setStatus('error'); }
-  }
-
   async function fetchParsed(fromDays: number, toDays: number, label: string) {
     if (!hasPerm) { await requestPermission(); return; }
-    setMode('parsed'); setStatus('loading'); setError(null);
-    setMessages([]); setSenders([]); setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
-    setRawCount(null); setActiveWindow(label);
+    // [NEW] Guard against a second parse window being tapped while one is
+    // already running — previously only the sync button had a disabled
+    // check (disabled={syncStatus === 'syncing'}); the parse buttons had
+    // none at all, so any parse window could be tapped mid-fetch/mid-parse.
+    if (status === 'loading') return;
+    setStatus('loading'); setError(null);
+    setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
+    setActiveWindow(label); setMatchContextInfo(null);
     try {
       const msgs = await SmsReader.getMessages(fromDays, toDays);
       // Yield to UI thread before heavy parsing so the loading spinner renders
       await new Promise(resolve => setTimeout(resolve, 0));
-      const results = parseSmsMessages(msgs);
+
+      // [ADD] Fetch registered_facts + custom_categories ONCE for this parse
+      // run — matches ingestParsedMessages()'s existing convention of
+      // fetching the current user once per batch, not once per message.
+      // Both calls run in parallel since they're independent reads.
+      // [FIX-shaped note] If either fetch fails (e.g. not authenticated,
+      // or a transient network error), parsing still proceeds WITHOUT
+      // matching context rather than blocking entirely — a registered-facts
+      // outage should degrade to "acts like before this feature existed,"
+      // never to "can't parse SMS at all." Every message still gets fully
+      // extracted and categorized via regex; only the extra resolution
+      // layer is skipped.
+      let matchContext: MatchContext = {};
+      try {
+        const [registeredFacts, customCategories] = await Promise.all([
+          fetchActiveRegisteredFacts(),
+          fetchCustomCategories(),
+        ]);
+        matchContext = { registeredFacts, customCategories };
+        setMatchContextInfo({ facts: registeredFacts.length, customCats: customCategories.length });
+      } catch (fetchErr: any) {
+        console.warn('registered_facts/custom_categories fetch failed — parsing without match context:', fetchErr?.message ?? fetchErr);
+        setMatchContextInfo({ facts: 0, customCats: 0 });
+      }
+
+      const results = parseSmsMessages(msgs, matchContext);
       setRawParseResults(results);
       setSyncResult(null);
       setSyncStatus('idle');
-      // [FIX] parseSmsMessages() returns (ParsedTransaction | BalanceUpdate)[]
-      // since smsParser.ts added the BalanceUpdate branch (pure balance-
-      // disclosure SMS never become a transaction row). setParsed() is typed
-      // ParsedTransaction[], so passing the raw union straight through was a
-      // real type error, not just a strictness nitpick — a BalanceUpdate
-      // genuinely doesn't have txn_date/amount/type/category/etc. Split the
-      // union with the existing isBalanceUpdate() guard instead of widening
-      // the state type and pushing the problem into every render call below
-      // that reads txn.amount/txn.category/etc.
       const txns = results.filter((r): r is ParsedTransaction => !isBalanceUpdate(r));
       const balances = results.filter(isBalanceUpdate);
       setParsed(txns);
@@ -125,12 +115,19 @@ export default function TestSmsScreen() {
     const report = {
       generated_at: new Date().toISOString(),
       window: activeWindow,
+      match_context: matchContextInfo,
       summary: {
         total:          parsed.length,
         approved:       parsed.filter(p => p.status === 'approved').length,
         pending_review: parsed.filter(p => p.status === 'pending_review').length,
         parse_failures: parsed.filter(p => p.parse_failure !== null).length,
         balance_updates: balanceUpdates.length,
+        // [ADD] How many rows this run got resolved via a saved custom
+        // category or a matched registered fact, vs plain regex — useful
+        // signal during testing for whether the new matching is actually
+        // firing on real data, not just in the unit tests.
+        resolved_via_custom_category: parsed.filter(p => p.resolvedFrom === 'custom_category').length,
+        resolved_via_registered_fact: parsed.filter(p => p.resolvedFrom === 'registered_fact').length,
         failure_breakdown: parsed.reduce<Record<string, number>>((acc, p) => {
           if (p.parse_failure) acc[p.parse_failure] = (acc[p.parse_failure] ?? 0) + 1;
           return acc;
@@ -167,16 +164,18 @@ export default function TestSmsScreen() {
       return;
     }
 
-    // [FLAG] No idempotency key exists on `transactions` yet (see the
-    // KNOWN GAPS note at the top of src/lib/api/transactions.ts) —
-    // re-syncing the same window WILL insert duplicate rows. This confirm
-    // step is a manual guard for testing only, not a real dedup solution.
-    // Deliberately deferred per project decision until the parsing →
-    // review → edit/split flow is confirmed working end-to-end.
     Alert.alert(
       'Sync to Supabase?',
       `This will insert ${parsed.length} transaction(s) and apply ${balanceUpdates.length} balance update(s). ` +
-      `There is no duplicate-detection yet — re-syncing the same window will create duplicate rows. Continue?`,
+      // [FIX] Old copy said "there is no duplicate-detection yet — re-
+      // syncing the same window will create duplicate rows," which was
+      // true and was the confirmed root cause of real duplicate rows in
+      // production. insertTransaction() now checks (user_id, raw_text,
+      // txn_date) before inserting and skips anything already present, so
+      // re-syncing the same window is safe — this button is additionally
+      // now disabled after a completed sync as defense in depth, but the
+      // real protection lives server-side.
+      `Already-synced messages will be skipped automatically. Continue?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -263,18 +262,9 @@ export default function TestSmsScreen() {
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollInner}>
 
-        {/* ── Permission + Fetch filtered ── */}
-        <View style={s.btnRow}>
-          <TouchableOpacity style={s.btnSecondary} onPress={requestPermission} activeOpacity={0.8}>
-            <Text style={s.btnSecondaryText}>Request Permission</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.btnPrimary} onPress={fetchFiltered} activeOpacity={0.8}>
-            <Text style={s.btnPrimaryText}>Fetch Bank SMS</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={s.debugBtn} onPress={fetchDebug} activeOpacity={0.8}>
-          <Text style={s.debugBtnText}>🔍 Debug — Show All Senders in Inbox</Text>
+        {/* ── Permission ── */}
+        <TouchableOpacity style={s.btnSecondary} onPress={requestPermission} activeOpacity={0.8}>
+          <Text style={s.btnSecondaryText}>Request Permission</Text>
         </TouchableOpacity>
 
         {/* ── Parse buttons — one per 90-day window ── */}
@@ -288,8 +278,10 @@ export default function TestSmsScreen() {
             style={[
               s.parseBtn,
               activeWindow === label && status === 'done' && s.parseBtnActive,
+              status === 'loading' && s.syncBtnDisabled,
             ]}
             onPress={() => fetchParsed(fromDays, toDays, label)}
+            disabled={status === 'loading'}
             activeOpacity={0.8}
           >
             <Text style={s.parseBtnText}>
@@ -299,19 +291,38 @@ export default function TestSmsScreen() {
           </TouchableOpacity>
         ))}
 
+        {/* [ADD] Match-context visibility — shows what was actually fetched
+            and used for this parse run. */}
+        {matchContextInfo && (
+          <View style={s.matchContextBadge}>
+            <Text style={s.matchContextText}>
+              🔗 {matchContextInfo.facts} registered fact(s) · {matchContextInfo.customCats} saved categor{matchContextInfo.customCats === 1 ? 'y' : 'ies'} loaded for this run
+            </Text>
+          </View>
+        )}
+
         {/* Export parsed report — only shown after parsing */}
-        {mode === 'parsed' && status === 'done' && (
+        {status === 'done' && (
           <TouchableOpacity style={s.exportBtn} onPress={exportReport} activeOpacity={0.8}>
             <Text style={s.exportBtnText}>📥 Export Report — {activeWindow}</Text>
           </TouchableOpacity>
         )}
 
         {/* Sync to Supabase — manual, no dedup yet (see syncToSupabase comment) */}
-        {mode === 'parsed' && status === 'done' && (
+        {status === 'done' && (
           <TouchableOpacity
-            style={[s.syncBtn, syncStatus === 'syncing' && s.syncBtnDisabled]}
+            style={[s.syncBtn, (syncStatus === 'syncing' || syncStatus === 'done') && s.syncBtnDisabled]}
             onPress={syncToSupabase}
-            disabled={syncStatus === 'syncing'}
+            // [FIX] Was only disabled while actively syncing — re-enabled
+            // immediately after completion with the same rawParseResults
+            // still in state, so a second tap resubmitted the identical
+            // batch (confirmed root cause of real duplicate rows). Now
+            // stays disabled once done; re-parsing the window (which
+            // already resets syncStatus to 'idle') is required before
+            // syncing again, matching the pre-insert idempotency guard now
+            // in transactions.ts as defense in depth, not a replacement
+            // for it.
+            disabled={syncStatus === 'syncing' || syncStatus === 'done'}
             activeOpacity={0.8}
           >
             {syncStatus === 'syncing' ? (
@@ -363,13 +374,7 @@ export default function TestSmsScreen() {
         {status === 'loading' && (
           <View style={s.center}>
             <ActivityIndicator size="large" color={colors.brand} />
-            <Text style={s.loadingText}>
-              {mode === 'debug'
-                ? 'Reading all senders...'
-                : mode === 'parsed'
-                ? `Parsing ${activeWindow}...`
-                : 'Reading SMS...'}
-            </Text>
+            <Text style={s.loadingText}>Parsing {activeWindow}...</Text>
           </View>
         )}
 
@@ -377,23 +382,8 @@ export default function TestSmsScreen() {
           <View style={s.errorBox}><Text style={s.errorText}>Error: {error}</Text></View>
         )}
 
-        {/* ── Result headers ── */}
-        {status === 'done' && mode === 'filtered' && (
-          <View style={s.resultHeader}>
-            <Text style={s.resultCount}>{messages.length} bank SMS found (last 90 days)</Text>
-          </View>
-        )}
-
-        {status === 'done' && mode === 'debug' && (
-          <View style={s.resultHeader}>
-            <Text style={s.resultCount}>
-              {rawCount} total SMS in inbox · {senders.length} unique senders
-            </Text>
-            <Text style={s.resultSub}>Search for PNBSMS or "Punjab" below to confirm if PNB is present</Text>
-          </View>
-        )}
-
-        {status === 'done' && mode === 'parsed' && (
+        {/* ── Result header ── */}
+        {status === 'done' && (
           <View style={s.resultHeader}>
             <Text style={s.resultCount}>
               {activeWindow} · {parsed.length} parsed · ✅ {approved} approved · ⏳ {needReview} review · ⚠️ {failures} failed
@@ -404,35 +394,8 @@ export default function TestSmsScreen() {
           </View>
         )}
 
-        {/* ── Message lists ── */}
-        {mode === 'debug' && senders.map((sender, i) => (
-          <View key={i} style={[
-            s.senderRow,
-            (sender.toUpperCase().includes('PNB') || sender.toUpperCase().includes('PUNJAB')) && s.senderRowHighlight,
-          ]}>
-            <Text style={[
-              s.senderText,
-              (sender.toUpperCase().includes('PNB') || sender.toUpperCase().includes('PUNJAB')) && s.senderTextHighlight,
-            ]}>
-              {sender}
-            </Text>
-          </View>
-        ))}
-
-        {mode === 'filtered' && messages.map((msg, i) => (
-          <View key={msg.id} style={s.msgCard}>
-            <View style={s.msgCardHead}>
-              <Text style={s.msgSender}>{msg.address}</Text>
-              <Text style={s.msgDate}>
-                {new Date(msg.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-              </Text>
-            </View>
-            <Text style={s.msgBody}>{msg.body}</Text>
-            <Text style={s.msgIndex}>#{i + 1}</Text>
-          </View>
-        ))}
-
-        {mode === 'parsed' && parsed.map((txn, i) => {
+        {/* ── Message list ── */}
+        {parsed.map((txn, i) => {
           const isOk      = txn.status === 'approved';
           const isFailed  = txn.parse_failure !== null;
           const cardColor = isFailed ? '#fff7ed' : isOk ? '#f0fdf4' : '#fefce8';
@@ -451,6 +414,11 @@ export default function TestSmsScreen() {
               )}
               <Text style={s.parsedCategory}>
                 {[txn.type, txn.category, txn.sub_category].filter(Boolean).join(' › ')}
+                {/* [ADD] Show which mechanism resolved this, when relevant —
+                    directly surfaces whether registered_facts/custom_categories
+                    matching actually fired, for testing visibility. */}
+                {txn.resolvedFrom === 'custom_category' ? '  🔖 saved' : ''}
+                {txn.resolvedFrom === 'registered_fact' ? '  🔗 matched' : ''}
               </Text>
               {(txn.merchant || txn.channel) && (
                 <Text style={s.parsedMeta}>{[txn.merchant, txn.channel].filter(Boolean).join(' · ')}</Text>
@@ -484,15 +452,15 @@ const s = StyleSheet.create({
   scroll:       { flex: 1 },
   scrollInner:  { padding: spacing.lg, paddingBottom: 40, gap: spacing.xs },
 
-  btnRow:           { flexDirection: 'row', gap: spacing.sm },
-  btnPrimary:       { flex: 1, backgroundColor: colors.brand, paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
-  btnPrimaryText:   { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.white },
   btnSecondary:     { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
   btnSecondaryText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.dark },
 
   parseBtn:       { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#93c5fd', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
   parseBtnActive: { backgroundColor: '#dbeafe', borderColor: '#3b82f6' },
   parseBtnText:   { fontSize: fontSize.sm, color: '#1d4ed8', fontWeight: fontWeight.semibold },
+
+  matchContextBadge: { backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: '#ddd6fe', borderRadius: radius.md, padding: spacing.sm, alignItems: 'center' },
+  matchContextText:  { fontSize: fontSize.xs, color: '#5b21b6', fontWeight: fontWeight.semibold },
 
   exportBtn:     { backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#86efac', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
   exportBtnText: { fontSize: fontSize.sm, color: '#15803d', fontWeight: fontWeight.semibold },
@@ -504,9 +472,6 @@ const s = StyleSheet.create({
   syncResultBox:  { padding: spacing.sm, backgroundColor: '#ecfdf5', borderRadius: radius.md, borderWidth: 1, borderColor: '#a7f3d0' },
   syncResultText: { fontSize: fontSize.xs, fontWeight: fontWeight.semibold, color: '#065f46' },
   syncErrorText:  { fontSize: 10, color: '#b91c1c', marginTop: 2 },
-
-  debugBtn:     { backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#d1d5db', paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
-  debugBtnText: { fontSize: fontSize.sm, color: '#374151', fontWeight: fontWeight.medium },
 
   sectionHeader: { marginTop: spacing.md, marginBottom: spacing.xs },
   sectionTitle:  { fontSize: fontSize.xs, fontWeight: fontWeight.semibold, color: colors.muted, letterSpacing: 0.5 },
@@ -524,17 +489,7 @@ const s = StyleSheet.create({
   resultCount:  { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.brand },
   resultSub:    { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
 
-  msgCard:     { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md },
-  msgCardHead: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
-  msgSender:   { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: colors.brand },
-  msgDate:     { fontSize: fontSize.xs, color: colors.muted },
-  msgBody:     { fontSize: fontSize.xs, color: colors.dark, lineHeight: 18 },
   msgIndex:    { fontSize: 10, color: colors.muted, marginTop: 4, textAlign: 'right' },
-
-  senderRow:           { paddingVertical: 6, paddingHorizontal: spacing.sm, borderRadius: radius.sm, backgroundColor: colors.surface },
-  senderRowHighlight:  { backgroundColor: '#fef9c3', borderWidth: 1, borderColor: '#fbbf24' },
-  senderText:          { fontSize: fontSize.xs, color: colors.dark },
-  senderTextHighlight: { fontWeight: fontWeight.bold, color: '#92400e' },
 
   parsedCard:     { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md },
   parsedHead:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 },

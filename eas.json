@@ -8,14 +8,22 @@
       "developmentClient": true,
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" }
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_PUBLIC_TEST_AUTH_MODE": "true",
+        "EXPO_PUBLIC_TEST_AUTH_SHARED_SECRET": "x7Qp2mZ9vLk4RtY8wN3jFhB6cD1sA0eU"
+      }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
       "developmentClient": false,
       "android": { "buildType": "apk" },
-      "env": { "NPM_CONFIG_LEGACY_PEER_DEPS": "true" }
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_PUBLIC_TEST_AUTH_MODE": "true",
+        "EXPO_PUBLIC_TEST_AUTH_SHARED_SECRET": "x7Qp2mZ9vLk4RtY8wN3jFhB6cD1sA0eU"
+      }
     },
     "production": {}
   }

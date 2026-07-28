@@ -134,6 +134,62 @@
  *         is a safety net for NACH debits that reach here without Layer 2
  *         having classified them (e.g. "INDIAN CLEARING CORP LTD" — 20 of
  *         259 transactions in one 90-day sample, all previously uncategorized).
+ *   ── This pass (merchant taxonomy expansion, per pileap_module_merchant_
+ *      taxonomy.md) ──────────────────────────────────────────────────────
+ *   [ADD] TaxonomyEntry.ambiguous / Classification.ambiguous — forces
+ *         pending_review in BOTH parseSingleSms branches when a
+ *         classification is a best-guess for a merchant whose SMS text
+ *         structurally can't distinguish between multiple real categories.
+ *   [FIX] Investment > Stocks > Equity Purchase (Zerodha/Groww/Upstox/etc.)
+ *         — marked ambiguous:true. A bare debit to a broker platform has no
+ *         text signal distinguishing equity purchase from MF-via-Coin, a
+ *         bond purchase, F&O margin, or gold — was previously guessed as
+ *         Equity Purchase and auto-approved every time. Real fix (not this
+ *         pass) is a Table-X-style "what do you use this broker for"
+ *         registration so this stops needing to guess per-transaction.
+ *   [ADD] Broker list expanded: 5paisa, ICICI Direct, HDFC Securities,
+ *         Kotak Securities, Motilal Oswal, IIFL Securities, Sharekhan,
+ *         Paytm Money, IndMoney, Axis Direct, SBI Securities, Fyers, Alice Blue.
+ *   [ADD] Mutual Funds > SIP — named AMC direct-debit patterns (HDFC/SBI/
+ *         ICICI Pru/Axis/Nippon India/UTI/Kotak MF, Mirae Asset, Franklin
+ *         Templeton, DSP, ABSL MF, Parag Parikh, Quant MF) + aggregators
+ *         (Kuvera, ET Money, Zerodha Coin). NOT ambiguous — an AMC only
+ *         ever does mutual funds, unlike a broker/aggregator platform.
+ *   [ADD] Bonds — IndiaBonds, Wint Wealth, GoldenPi. Gold — Augmont.
+ *   [ADD] Insurance > Life — HDFC Life, ICICI Prudential Life, SBI Life,
+ *         Max Life, Tata AIA, PNB MetLife, Kotak Life, ABSL Insurance,
+ *         Canara HSBC Life, Star Union Dai-ichi, Future Generali Life.
+ *   [ADD] Insurance > Health — Niva Bupa, Max Bupa, Care Health, HDFC Ergo
+ *         Health, ICICI Lombard Health, ABSL Health, Reliance Health,
+ *         Bajaj Allianz Health, National Insurance.
+ *   [ADD] Insurance > Motor — Tata AIG, Digit, Acko (latter two require
+ *         qualifying "insurance"/"policy" context — bare tokens are common
+ *         enough word/name roots to risk the same collision class as the
+ *         existing dhan/spa loose-match denylist entries).
+ *   [ADD] Insurance > Annuity/Pension — new sub-category, named providers
+ *         only (LIC Jeevan Shanti, HDFC Life Click2Retire).
+ *   [ADD] Loans > Auto Loan (new) — Sundaram Finance, Mahindra Finance, TVS Credit.
+ *   [ADD] Loans > Education Loan (new) — Avanse, HDFC Credila, Auxilo.
+ *   [ADD] Loans > Gold Loan (new) — Muthoot, Manappuram.
+ *   [ADD] Loans > Personal Loan — Bajaj Finserv, Fullerton, IDFC First,
+ *         Tata Capital, Navi, KreditBee, MoneyTap, CASHe.
+ *   [ADD] Loans > Home Loan — LIC HFL, ICICI Home Finance.
+ *   [ADD] BNPL — new category (LazyPay, Simpl, ZestMoney, Amazon Pay Later).
+ *   [ADD] Bank Deposits > Recurring Deposit — new sub-category, taxonomy
+ *         doc flagged zero prior coverage.
+ *   [ADD] Government Schemes > SCSS/NSC/KVP — new sub-category, no prior coverage.
+ *   [NOT DONE — deliberately] Real estate, P2P lending, REITs/InvITs
+ *         (unless broker-routed, already covered by the broker expansion),
+ *         rental income, freelance income, domestic help/rent — taxonomy
+ *         doc tags these [CUSTOM], not [REGEX]. No universal SMS pattern
+ *         exists for person/entity-specific payees; left unaddressed here
+ *         by design, pending the custom_categories write path (see
+ *         transactions.ts gap #8).
+ *   [NOT DONE — deliberately] Travel insurance — taxonomy doc warns this is
+ *         usually a small bundled add-on inside a flight/OTA booking and
+ *         must NOT get miscounted as Insurance Cover; no safe text signal
+ *         separates it from the parent booking, so no pattern was added.
+ *
  *   [ADD] New categories/sub-categories (all generic keyword patterns unless
  *         noted otherwise; P2P transfers to named individuals, donations, and
  *         domestic-help wages are deliberately NOT addressed here — no text
@@ -238,6 +294,12 @@ export interface ParsedTransaction {
   // Failure tracking
   parse_failure:         string | null;
 
+  // [ADD] Which mechanism produced the category, if any — see
+  // Classification.resolvedFrom for the full explanation. Undefined for
+  // ordinary regex matches (the vast majority of rows); only set when
+  // custom_categories or registered_facts actually resolved this one.
+  resolvedFrom?:          'custom_category' | 'registered_fact';
+
   // Raw — AES-256 encrypt before INSERT (arch 11.2)
   raw_text:              string;
 }
@@ -278,12 +340,81 @@ interface ExtractedFields {
   balance:      number | null;
   ref_number:   string | null;
   ref_type:     'upi_rrn' | 'neft_utr' | 'unknown' | null;
+  // [ADD] Generic reference string (UMRN/Mandate ID/Policy No/Folio No/...)
+  // — for registered_facts matching only. See extractReferenceValue() below
+  // and its counterpart in layer2_ruleset.js for why this is deliberately
+  // NOT typed by label — one field, whatever the bank/entity happened to
+  // call it.
+  reference_value: string | null;
 }
 
-interface Classification {
+// ─── registered_facts / custom_categories — matching context ─────────────
+//
+// [ADD] These mirror the DB tables of the same name (see migrations).
+// Passed in from the caller (test-sms.tsx today; any future sync entry
+// point later) as an optional MatchContext — smsParser.ts stays a pure
+// function with no DB access of its own, per the existing architecture.
+// Fetched ONCE per sync batch by the caller, not per-message.
+
+export interface RegisteredFact {
+  id:                    string;
+  fact_type:             'emi' | 'sip' | 'insurance_premium' | 'salary';
+  reference_value:       string | null;
+  // [ADD] Now the primary Tier-2 matching signal, alongside amount — see
+  // matchRegisteredFact() below. Normalised via the same
+  // normaliseMerchantKey() custom_categories already uses, so both tables
+  // agree on what "the same merchant" means.
+  merchant_key:          string | null;
+  expected_amount:       number | null;
+  amount_tolerance:      number;
+  // [KEPT — no longer consumed by matchRegisteredFact()] A recurring
+  // payment isn't necessarily monthly (weekly/quarterly are real cases
+  // too), so day-of-month was never a reliable "same fact" signal on its
+  // own. Matching now runs on amount + merchant_key instead (see below).
+  // Not deleting these fields/columns in case day-tolerance ever needs
+  // revisiting — they're just no longer read by the matcher.
+  expected_day:          number | null;
+  day_tolerance:         number;
+  resolved_type:         TxnType;
+  resolved_category:     string;
+  resolved_sub_category: string | null;
+  // [ADD] Only meaningful when fact_type === 'emi' — null otherwise. Not
+  // consumed by matchRegisteredFact() (matching is amount/merchant_key/
+  // reference only, deliberately identity-agnostic beyond that); this
+  // rides along purely for the Debt Ratio scoring formula (unsecured EMIs
+  // weighted 2x) to read once health_module_tag scoring consumption
+  // resumes.
+  is_secured_debt:        boolean | null;
+}
+
+export interface CustomCategoryEntry {
+  merchant_key: string;
   type:         TxnType;
   category:     string;
   sub_category: string | null;
+}
+
+export interface MatchContext {
+  registeredFacts?:  RegisteredFact[];
+  customCategories?: CustomCategoryEntry[];
+}
+
+export interface Classification {
+  type:         TxnType;
+  category:     string;
+  sub_category: string | null;
+  // [ADD] Carried from TaxonomyEntry.ambiguous — true when this label is a
+  // best-guess default for a merchant/platform whose SMS text structurally
+  // cannot distinguish between multiple real categories (e.g. a broker
+  // debit that could be equity, MF-via-Coin, bonds, or margin — the SMS
+  // never says which). Never silently auto-approved; see needsReview in
+  // both parseSingleSms branches.
+  ambiguous?:   boolean;
+  // [ADD] Which mechanism produced this classification. Purely informational
+  // (not written to the DB as its own column — TransactionRow/EditModal can
+  // use it to show e.g. "matched from your saved Zerodha preference" vs a
+  // generic category badge). Undefined = ordinary regex match, the default.
+  resolvedFrom?: 'custom_category' | 'registered_fact';
 }
 
 // ─── UPI infrastructure senders ──────────────────────────────────────────────
@@ -380,22 +511,39 @@ interface TaxonomyEntry {
   direction?:   'credit' | 'debit';
   minAmount?:   number;
   maxAmount?:   number;
+  // [ADD] Mark true when this entry's label is a best-guess for a merchant
+  // whose SMS text can't structurally distinguish between multiple real
+  // categories (e.g. broker platforms — see Zerodha/Groww/Upstox entry
+  // below). Forces pending_review instead of silent auto-approval. Do NOT
+  // set this on entries where the merchant/keyword genuinely is
+  // unambiguous (AMC direct debits, named insurers, named lenders) — only
+  // on platform names that structurally cover more than one real category.
+  ambiguous?:   boolean;
 }
 
 const TAXONOMY: TaxonomyEntry[] = [
 
-  // ── Food & Dining ─────────────────────────────────────────────────────────
-  { type: 'Expense', category: 'Food & Dining', sub_category: 'Quick Commerce',
+  // ── Quick Commerce ───────────────────────────────────────────────────────
+  // [CHANGE] Previously two separate entries: Zepto had its own top-level
+  // 'Zepto' category, while Blinkit/Instamart/Dunzo sat as a sub-category
+  // inside Food & Dining. Consolidated into one shared bucket category —
+  // same pattern as Shopping (Amazon/Flipkart/Myntra/Nykaa/Meesho all
+  // co-equal merchants under one category), so a new quick-commerce
+  // merchant can just be added to this one patterns array rather than
+  // needing its own category block.
+  { type: 'Expense', category: 'Quick Commerce', sub_category: 'Instant Delivery',
     direction: 'debit',
     patterns: [
       /\bblinkit\b/i,
-      // [FIX] \bzepto\b → \bzepto (no trailing \b) — ZEPTONOW was not matching.
+      // No trailing \b — ZEPTONOW (no space before "NOW") would not match
+      // \bzepto\b, see changelog note above.
       /\bzepto/i,
       /\bswiggy\s+instamart\b/i,
       /\binstamart\b/i,
       /\bdunzo\b/i,
     ] },
 
+  // ── Food & Dining ─────────────────────────────────────────────────────────
   // [FIX] Removed maxAmount:2000 — no logical cap on restaurant bills.
   // [FIX] domino'?s? → dominos? — "Dominos" (no apostrophe) was not matching.
   // [FIX] Added: dining, coffee, meal.
@@ -426,7 +574,7 @@ const TAXONOMY: TaxonomyEntry[] = [
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Groceries',
     direction: 'debit',
     patterns: [/\bbigbasket\b/i, /\bd[\s-]?mart\b/i, /\breliance\s+(fresh|smart)\b/i,
-               /\bsupermarket\b/i, /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
+               /\bsuper\s*market\b/i, /\bgrocery\b/i, /\bbig\s+bazaar\b/i] },
 
   // [ADD — this pass] Milk & Dairy. Deliberately its own sub_category
   // rather than folded into Groceries — recurring daily/monthly milk-booth
@@ -715,11 +863,20 @@ const TAXONOMY: TaxonomyEntry[] = [
   // ── Finance Charges ───────────────────────────────────────────────────────
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Cash Withdrawal',
     direction: 'debit',
-    patterns: [/\batm\s+(debit|withdrawal|wdl|cash)\b/i, /\bcash\s+withdrawal\b/i] },
+    // [FIX] Added \bwithdrawn\b. Real HDFC ATM template — "Withdrawn
+    // Rs.12000 From HDFC Bank Card x2898 At +TRIPLICANE On DATE Bal
+    // Rs.X" — never contains the literal word "ATM" or the phrase "cash
+    // withdrawal" anywhere in the body, so neither existing pattern ever
+    // matched it despite GENERIC_DEBIT (layer2_ruleset.js) already
+    // recognizing "Withdrawn" as a real transaction. Confirmed live: every
+    // ATM withdrawal in production data landed Uncategorized for this
+    // reason. Scoped to direction:'debit' (already true for this whole
+    // entry), so this can't collide with an unrelated credit-side mention.
+    patterns: [/\batm\s+(debit|withdrawal|wdl|cash)\b/i, /\bcash\s+withdrawal\b/i, /\bwithdrawn\b/i] },
 
   { type: 'Expense', category: 'Finance Charges', sub_category: 'Bank Charges',
     direction: 'debit',
-    patterns: [/\bservice\s+charge\b/i, /\bannual\s+(fee|charge)\b/i,
+    patterns: [/\bservice\s+charges?\b/i, /\bannual\s+(fee|charge)\b/i,
                /\bpenalty\b/i, /\blate\s+payment\s+fee\b/i] },
 
   // ── Household (new category, this pass) ───────────────────────────────────
@@ -824,7 +981,15 @@ const TAXONOMY: TaxonomyEntry[] = [
 
   { type: 'Income', category: 'Refunds', sub_category: 'Purchase Refund',
     direction: 'credit',
-    patterns: [/\brefund\b/i, /\bcashback\b/i, /\brefunded\b/i] },
+    // [FIX] Added \brefunds\b (plural) — confirmed via a 1,127-message
+    // real-data test that this was the ONLY case in the entire corpus
+    // whose classification depended on loose-matching. The message
+    // ("...from VPA amazon.refunds@axisbank...") has "refunds" with real
+    // punctuation boundaries on both sides (a dot before, @ after), so it
+    // matches directly with no loose-matching needed once the plural form
+    // is included — this was a pluralization gap, not a genuine need for
+    // substring/boundary-stripped matching.
+    patterns: [/\brefund\b/i, /\brefunds\b/i, /\bcashback\b/i, /\brefunded\b/i] },
 
   // [FIX — this pass] Split out of the Purchase Refund entry above.
   // "reversal"/"reversed" was previously lumped in with "refund"/
@@ -851,7 +1016,29 @@ const TAXONOMY: TaxonomyEntry[] = [
   { type: 'Income', category: 'Passive Income', sub_category: 'Interest Income',
     direction: 'credit',
     patterns: [/\binterest\s+(credit|credited|received)\b/i,
-               /\bfd\s+interest\b/i, /\bsavings\s+interest\b/i] },
+               /\bfd\s+interest\b/i, /\bsavings\s+interest\b/i,
+               // [FIX — this pass, found via corpus test] Real template
+               // "Quarterly interest Rs.X credited to A/c Y as on DATE" —
+               // one of the most common credit templates in the corpus
+               // (appears across nearly every bank) — matched none of the
+               // above: "interest" and "credited" aren't adjacent, the
+               // amount clause sits between them. Was landing as a fully
+               // uncategorized 'approved' credit (small amounts don't trip
+               // the >=5000 review threshold), invisible to Income
+               // Stability/Savings Rate despite being real, recurring
+               // income. Bounded-distance pattern, still direction:'credit'
+               // scoped so this can't leak into debit-side matches.
+               /\binterest\b.{0,40}\bcredited\b/i,
+               // [FIX] Added \binterest\s+paid\b. Real HDFC template —
+               // "Update! INR 211.00 deposited in HDFC Bank A/c XX4820 on
+               // 30-JUN-26 for Interest paid till 30-JUN-2026.Avl bal..."
+               // — never uses "credited"/"received" at all, only "paid",
+               // so none of the patterns above ever matched it despite
+               // GENERIC_CREDIT (layer2_ruleset.js) already recognizing
+               // "deposited" as a real transaction. Confirmed live: every
+               // one of these quarterly/monthly interest credits landed
+               // Uncategorized for this reason.
+               /\binterest\s+paid\b/i] },
 
   // [ADD] Stock Dividend income — distinct from interest income.
   // "3rd Interim Dividend of 50 paise per share for FY 2025-26 by Manappuram Finance"
@@ -883,10 +1070,66 @@ const TAXONOMY: TaxonomyEntry[] = [
     // [FIX] \bsip\b → requires qualifying context word.
     // Bare \bsip\b was firing on "sip gateway" (a payment gateway, not SIP investment).
     // "sip of", "sip installment", "sip debited", "sip payment", "sip contribution"
+    //
+    // [ADD — this pass] Named AMC direct-debit patterns from taxonomy doc.
+    // Unlike the broker-platform entry above, these are NOT ambiguous — an
+    // AMC (as opposed to a broker/aggregator) only ever does mutual funds,
+    // so a debit naming one of these directly is a confident SIP/lump-sum
+    // MF match with no other plausible category. Aggregator names that
+    // ALSO do non-MF investing (Groww, Paytm Money, IndMoney — already in
+    // the broker list above) are deliberately NOT duplicated here; a plain
+    // debit to one of those stays ambiguous and pending_review, same as
+    // any other broker debit, unless the SMS also contains an explicit
+    // "SIP"/"mutual fund" signal (which the patterns above already catch
+    // and which will out-score the ambiguous broker entry).
+    direction: 'debit',
     patterns: [
       /\bsip\s+(of|installment|debit(?:ed)?|payment|contribution)\b/i,
       /\bsystematic\s+investment\s+plan\b/i,
+      /\bhdfc\s*mutual\s*fund\b/i, /\bhdfc\s*mf\b/i,
+      /\bsbi\s*mutual\s*fund\b/i, /\bsbi\s*mf\b/i,
+      /\bicici\s*prudential\s*mf\b/i, /\bicici\s*pru\s*mf\b/i,
+      /\baxis\s*mutual\s*fund\b/i, /\baxis\s*mf\b/i,
+      /\bnippon\s*india\s*mf\b/i, /\buti\s*mutual\s*fund\b/i, /\buti\s*mf\b/i,
+      /\bkotak\s*mutual\s*fund\b/i, /\bkotak\s*mf\b/i,
+      /\bmirae\s*asset\b/i, /\bfranklin\s*templeton\b/i,
+      /\bdsp\s*mutual\s*fund\b/i, /\bdsp\s*mf\b/i,
+      /\baditya\s*birla\s*sun\s*life\s*mf\b/i, /\babsl\s*mf\b/i,
+      /\bparag\s*parikh\b/i, /\bquant\s*mutual\s*fund\b/i, /\bquant\s*mf\b/i,
+      /\bkuvera\b/i, /\bet\s*money\b/i, /\bzerodha\s*coin\b/i,
     ] },
+
+  // [ADD — this pass, found via corpus test] Lump-sum Mutual Fund purchase
+  // — a genuinely common template ("Mutual Fund purchase of Rs.X in <Fund
+  // Name> successful, debited from A/c Y on DATE") had ZERO coverage: no
+  // "sip" wording (this isn't a SIP), and most real fund scheme names
+  // ("HDFC Top 100 Fund", "Axis Bluechip Fund", "SBI Small Cap Fund",
+  // "Kotak Flexicap Fund", "ICICI Pru Value Discovery", "Nippon India
+  // Growth Fund") don't contain "mutual fund"/"mf" the way the AMC-name
+  // patterns above require. Matching on the phrase "Mutual Fund purchase"
+  // itself is unambiguous and doesn't require enumerating every scheme
+  // name. Separate sub_category from SIP since this is a one-off
+  // lump-sum contribution, not a recurring installment — the distinction
+  // matters if Investment Rate scoring ever wants to treat the two
+  // differently (e.g. a 3-month rolling average is a poor fit for an
+  // irregular lump-sum the way it fits a fixed monthly SIP).
+  { type: 'Investment', category: 'Mutual Funds', sub_category: 'Lumpsum',
+    direction: 'debit',
+    patterns: [/\bmutual\s+fund\s+purchase\b/i] },
+
+  // [ADD — this pass] Mutual Fund redemption — money moving OUT of a fund
+  // back to the bank account. Previously uncategorized entirely, which
+  // matters beyond a missing label: an uncategorized credit is exactly the
+  // shape Income Stability scoring would need to treat carefully — a
+  // redemption is a portfolio reallocation, not earned income, and
+  // shouldn't inflate an income-stability calculation the way a real
+  // salary/freelance credit should. Giving it an explicit category at
+  // least makes it identifiable and excludable, rather than an
+  // unexplained credit that could get swept into "Income" by whatever
+  // downstream logic eventually handles null-category credits.
+  { type: 'Investment', category: 'Mutual Funds', sub_category: 'Redemption',
+    direction: 'credit',
+    patterns: [/\bredemption\s+of\b/i, /\bredeemed\b/i] },
 
   // [FIX — this pass] direction: 'debit' added. Real data showed a Zerodha
   // "quarterly settlement payout" credit (unused margin returned to the
@@ -897,16 +1140,40 @@ const TAXONOMY: TaxonomyEntry[] = [
   // from a broker is a settlement, withdrawal, or dividend (dividends are
   // already separately handled by the Income > Dividends entry above).
   // Same root-cause class as the PPF/SSY direction fix above.
+  //
+  // [FIX — this pass] ambiguous: true added, plus expanded platform list
+  // (taxonomy doc's full broker roster). Root-cause fix: a bare debit to
+  // any of these platforms ("UPI debit to ZERODHA BROKING LTD") carries NO
+  // text signal distinguishing equity purchase from an MF-via-Coin SIP,
+  // a bond purchase, F&O margin, or gold — the SMS structurally cannot
+  // say which. Previously this entry guessed "Equity Purchase" every
+  // time and auto-approved it. 'Equity Purchase' is kept as the label
+  // (best available default — most broker debits genuinely are equity),
+  // but ambiguous:true now forces pending_review instead of a silent,
+  // possibly-wrong auto-approval. The real fix is a Table-X-style
+  // registration ("what do you primarily use this broker for?") so this
+  // never has to guess per-transaction once the user has told us once —
+  // not implemented in this pass.
   { type: 'Investment', category: 'Stocks', sub_category: 'Equity Purchase',
     direction: 'debit',
-    patterns: [/\bzerodha\b/i, /\bgroww\b/i, /\bupstox\b/i,
-               /\bangelone\b/i, /\bangel\s+one\b/i, /\bdhan\b/i] },
+    ambiguous: true,
+    patterns: [
+      /\bzerodha\b/i, /\bgroww\b/i, /\bupstox\b/i,
+      /\bangelone\b/i, /\bangel\s+one\b/i, /\bdhan\b/i,
+      // [ADD — this pass] rest of taxonomy doc's broker roster.
+      /\b5paisa\b/i, /\bicici\s*direct\b/i, /\bhdfc\s*sec(?:urities)?\b/i,
+      /\bkotak\s*sec(?:urities)?\b/i, /\bmotilal\s+oswal\b/i,
+      /\biifl\s*sec(?:urities)?\b/i, /\bsharekhan\b/i,
+      /\bpaytm\s*money\b/i, /\bindmoney\b/i, /\baxis\s*direct\b/i,
+      /\bsbi\s*sec(?:urities)?\b/i, /\bfyers\b/i, /\balice\s*blue\b/i,
+    ] },
 
-  // [ADD — this pass] Investment > Gold.
+  // [ADD — this pass] Investment > Gold. Augmont added per taxonomy doc
+  // (digital gold provider behind PhonePe/GPay/Paytm gold purchases).
   { type: 'Investment', category: 'Gold', sub_category: null,
     patterns: [
       /\bsafegold\b/i, /\bdigital\s+gold\b/i, /\bpaytm\s+gold\b/i,
-      /\bsovereign\s+gold\s+bond\b/i, /\bgold\s+bond\b/i,
+      /\bsovereign\s+gold\s+bond\b/i, /\bgold\s+bond\b/i, /\baugmont\b/i,
     ] },
 
   // [ADD — this pass] Investment > Bonds — new category, not previously in
@@ -925,83 +1192,355 @@ const TAXONOMY: TaxonomyEntry[] = [
   // category will render as "Uncategorized" in the UI despite being
   // correctly classified here — the exact three-way taxonomy mismatch
   // documented at the top of transactionCategories.ts.
+  // [ADD — this pass] Named bond platforms from taxonomy doc — additive to
+  // the existing generic \bbond\b pattern, doesn't replace it.
   { type: 'Investment', category: 'Bonds', sub_category: 'Bond Purchase',
-    patterns: [/\bbond\b/i] },
+    patterns: [
+      /\bbond\b/i, /\bindiabonds\b/i, /\bwint\s*wealth\b/i, /\bgoldenpi\b/i,
+    ] },
 
   // [FIX] Removed \bbajaj\s+finserv\b — Bajaj Finserv is primarily EMI/lending.
   // Bajaj Allianz kept (insurance-only entity, unambiguous).
   // [ADD] shriramlife — Shriram Life Insurance.
+  // [ADD — this pass] Full life-insurer roster from taxonomy doc.
   { type: 'Investment', category: 'Insurance', sub_category: 'Life Insurance',
     patterns: [
       /\blic\s+(premium|policy)\b/i, /\bterm\s+(plan|insurance)\b/i,
+      // [FIX — this pass, found via corpus test] 'LIC of India' — the
+      // literal name of India's largest life insurer, appearing in NACH
+      // mandate and premium-debit templates — matched NEITHER this list nor
+      // any other entry. Unlike ICICI Prudential (which is genuinely
+      // ambiguous — also an AMC brand), LIC is unambiguously life insurance
+      // only, so this is safe to resolve directly via REGEX rather than
+      // routing through registered_facts.
+      /\blic\s+of\s+india\b/i,
       /\binsurance\s+premium\b/i, /\bpolicy\s+premium\b/i,
-      /\bbajaj\s+allianz\b/i,
-      // [ADD]
+      /\bbajaj\s+allianz\s+life\b/i,
       /\bshriram\s*life\b/i, /\bshriramlife\b/i,
+      /\bhdfc\s*life\b/i, /\bicici\s*prudential\s*life\b/i,
+      /\bsbi\s*life\b/i, /\bmax\s*life\b/i, /\btata\s*aia\b/i,
+      /\bpnb\s*metlife\b/i, /\bkotak\s*life\b/i,
+      /\baditya\s*birla\s*sun\s*life\s*insurance\b/i,
+      /\bcanara\s*hsbc\s*life\b/i, /\bstar\s*union\s*dai.?ichi\b/i,
+      /\bfuture\s*generali\s*life\b/i,
     ] },
 
   // [ADD] manipalcigna — ManipalCigna Health Insurance.
+  // [ADD — this pass] Full health-insurer roster from taxonomy doc.
   { type: 'Investment', category: 'Insurance', sub_category: 'Health Insurance',
     patterns: [
       /\bhealth\s+insurance\b/i, /\bmediclaim\b/i, /\bstar\s+health\b/i,
-      // [ADD]
       /\bmanipal\s*cigna\b/i, /\bmanipalcigna\b/i,
+      /\bniva\s*bupa\b/i, /\bmax\s*bupa\b/i, /\bcare\s*health\b/i,
+      /\bhdfc\s*ergo\s*health\b/i, /\bicici\s*lombard\s*health\b/i,
+      /\baditya\s*birla\s*health\b/i, /\breliance\s*health\b/i,
+      /\bbajaj\s*allianz\s*health\b/i, /\bnational\s*insurance\b/i,
     ] },
 
   // [ADD — this pass] Investment > Insurance > Motor Insurance. No prior
   // category existed for vehicle insurance at all.
+  // [ADD — this pass] Public-sector general insurers — New India Assurance,
+  // Oriental Insurance, United India Insurance, Reliance General — flagged
+  // as gaps. Filed here rather than under Health: this codebase has no
+  // separate "General Insurance" bucket (only Life/Health/Motor/Other), and
+  // in the real corpus these four write mostly motor-policy premium debits
+  // for retail customers, matching Motor's existing convention of also
+  // hosting the general-purpose insurers (ICICI Lombard, HDFC Ergo, Bajaj
+  // Allianz General, Tata AIG) rather than duplicating them under Health.
+  // [FLAG] National Insurance is currently only wired under the Health
+  // entry above, despite also being a public-sector general insurer in the
+  // same family as these four — inconsistent, but left as-is here rather
+  // than moved/duplicated without seeing which policy type it actually
+  // shows up as in this user's real SMS corpus; a bare debit to any of
+  // these five names is genuinely ambiguous between motor/health/fire
+  // without more context, same ambiguity class already documented for the
+  // broker-platform entries above.
   { type: 'Investment', category: 'Insurance', sub_category: 'Motor Insurance',
     patterns: [
       /\bmotor\s+insurance\b/i, /\bvehicle\s+insurance\b/i,
       /\bcar\s+insurance\b/i, /\bbike\s+insurance\b/i,
       /\bicici\s+lombard\b/i, /\bhdfc\s+ergo\b/i, /\bbajaj\s+allianz\s+general\b/i,
+      // [ADD — this pass] "digit" and "acko" are common-enough word/name
+      // roots (e.g. "6-digit OTP" footers) that a bare pattern risks the
+      // same collision class as the existing dhan/spa denylist entries —
+      // required qualifying context ("insurance"/"policy") to stay safe,
+      // at the cost of missing bare-brand-name SMS if any exist. Revisit
+      // against real data before loosening, per this file's own testing
+      // convention for exactly this risk class.
+      /\btata\s*aig\b/i,
+      /\bdigit\s+(insurance|policy)\b/i, /\backo\s+(insurance|policy)\b/i,
+      /\bnew\s*india\s*assurance\b/i, /\boriental\s+insurance\b/i,
+      /\bunited\s+india\s+insurance\b/i, /\breliance\s+general\b/i,
+    ] },
+
+  // [ADD — this pass] Annuity/pension plan premiums — new sub-category.
+  // Named providers only (per taxonomy doc); a bare "annuity" or "pension
+  // plan" word is too generic/rare to be a safe standalone signal, so this
+  // stays narrow rather than risking false positives.
+  { type: 'Investment', category: 'Insurance', sub_category: 'Annuity/Pension',
+    patterns: [
+      /\bjeevan\s*shanti\b/i, /\bclick\s*2\s*retire\b/i,
+      /\bclick2retire\b/i,
     ] },
 
   // ── Liability ─────────────────────────────────────────────────────────────
+  // [FIX — this pass, real classification bug found via scoring-doc
+  // cross-check] Removed /\bnach\s+debit\b/i from this entry's patterns.
+  // "NACH debit" is purpose-agnostic bank terminology — it only says "this
+  // is a mandate-based auto-debit," identically for a loan EMI, a SIP, or
+  // an insurance premium. Keeping it here meant ANY unnamed NACH debit with
+  // no other identifying text (no lender/AMC/insurer name, no "sip"/
+  // "premium" wording) matched THIS entry — via the taxonomy loop, which
+  // runs before the registered_facts check in classify() — and got
+  // silently auto-labeled "Loan EMI" (Liability/debt), never reaching
+  // registered_facts at all. This is precisely the "classic ambiguous
+  // case" pileap_module_merchant_taxonomy.md says Table X exists to solve
+  // — a generic NACH SIP or insurance-premium debit with no lender/AMC/
+  // insurer name in the text — and the pattern here was quietly routing it
+  // around that mechanism entirely.
+  // Confirmed with a synthetic test: a bare "NACH Debit of Rs.5000... A/c
+  // XX1234 debited" message (no other signal) scored 1 on this entry and 0
+  // on every Investment/Insurance entry, so it resolved as Loan EMI outright
+  // — corrupting Debt Ratio (phantom debt added), Investment Rate (real SIP
+  // never counted), and Insurance Cover (real premium never counted) all at
+  // once, exactly the failure mode pileap_scoring_reality_check flags for
+  // Debt Ratio's secured/unsecured-EMI weighting to even be meaningful — it
+  // can't weight what shouldn't have been EMI in the first place.
+  // The remaining three patterns are kept: "EMI deducted/debited/paid" and
+  // "loan emi" both explicitly name EMI/loan, and "auto debit emi" contains
+  // "emi" explicitly too — none of these are purpose-agnostic the way bare
+  // "NACH debit" is, so they're safe to keep resolving directly via regex.
+  // A truly bare NACH debit (no "emi"/"loan"/lender/AMC/insurer wording at
+  // all) now correctly falls through this loop entirely and reaches the
+  // channel-gated registered_facts check further down, as designed.
+  // [FIX — this pass, found via corpus test] Moved ahead of the generic
+  // "Loan EMI" entry below. Real "Home Loan EMI" text (e.g. "Your Home Loan
+  // EMI of Rs.X has been debited...") matches BOTH this entry's
+  // \bhome\s+loan\b pattern AND the generic entry's \bloan\s+emi\b pattern
+  // (since "Home Loan EMI" contains "Loan EMI" as a substring) — a 1-1
+  // score tie. classify()'s tie-break is strict-greater-than, so whichever
+  // entry appears FIRST in this array wins ties. With the generic entry
+  // first (as it originally was), every Home/Personal/Auto/Education/Gold
+  // loan message that also happens to say "Loan EMI" (which is most of
+  // them, per the corpus) silently collapsed into the generic bucket,
+  // losing exactly the secured-vs-unsecured signal
+  // pileap_scoring_reality_check's Debt Ratio weighting needs. Reordering
+  // so specific lender/loan-type entries are tried first — and therefore
+  // win ties — fixes this without needing to touch the scoring logic at all.
+  // [ADD] Named HFC/lender roster from taxonomy doc, additive to the
+  // existing generic home/housing loan pattern.
+  // [ADD — this pass] Remaining housing-finance NBFC roster from taxonomy
+  // doc — LIC HFL/ICICI Home Finance were already covered; PNB Housing,
+  // Bajaj Housing Finance, Aavas, and Indiabulls Housing were flagged as
+  // gaps during a cross-check against a broader Indian-lender reference
+  // list and had zero prior coverage.
+  { type: 'Liability', category: 'Loans', sub_category: 'Home Loan',
+    patterns: [
+      /\bhome\s+loan\b/i, /\bhousing\s+loan\b/i, /\bmortgage\b/i,
+      /\blic\s*hfl\b/i, /\bicici\s*home\s*finance\b/i,
+      /\bpnb\s*housing\b/i, /\bbajaj\s*housing\s*finance\b/i,
+      /\baavas\b/i, /\bindiabulls\s*housing\b/i,
+    ] },
+
+  // [ADD — this pass] Named NBFC/fintech lender roster from taxonomy doc.
+  // [ADD — this pass] Remaining digital-lender roster from taxonomy doc —
+  // Fibe (formerly EarlySalary, both names still appear in live SMS
+  // depending on when the loan was taken), PaySense, Slice, Kissht, and
+  // mPokket/Home Credit were flagged as gaps. "slice" and "navi" are both
+  // short, dictionary-adjacent words — kept \b-bounded only, no additional
+  // qualifying context added here since these are the exact spellings the
+  // taxonomy doc lists as the lenders' own brand names, same risk class as
+  // the existing bare "navi"/"cashe" patterns already shipped in this
+  // entry — revisit against real corpus data if a collision turns up.
+  { type: 'Liability', category: 'Loans', sub_category: 'Personal Loan',
+    patterns: [
+      /\bpersonal\s+loan\b/i, /\binstant\s+loan\b/i,
+      /\bbajaj\s*finserv\b/i, /\bfullerton\b/i, /\bidfc\s*first\b/i,
+      /\btata\s*capital\b/i, /\bnavi\b/i, /\bkreditbee\b/i,
+      /\bmoneytap\b/i, /\bcashe\b/i,
+      /\bfibe\b/i, /\bearlysalary\b/i, /\bearly\s*salary\b/i,
+      /\bpaysense\b/i, /\bslice\b/i, /\bkissht\b/i,
+      /\bmpokket\b/i, /\bhome\s*credit\b/i,
+    ] },
+
+  // [ADD — this pass] Auto/car loan — new sub-category, no prior coverage.
+  // [ADD — this pass] Cholamandalam Finance — a major auto-loan NBFC,
+  // flagged as a gap during the same cross-check.
+  { type: 'Liability', category: 'Loans', sub_category: 'Auto Loan',
+    patterns: [
+      /\bauto\s+loan\b/i, /\bcar\s+loan\b/i, /\bvehicle\s+loan\b/i,
+      /\bsundaram\s*finance\b/i, /\bmahindra\s*finance\b/i,
+      /\btvs\s*credit\b/i, /\bcholamandalam\b/i,
+    ] },
+
+  // [ADD — this pass] Education loan — new sub-category, no prior coverage.
+  { type: 'Liability', category: 'Loans', sub_category: 'Education Loan',
+    patterns: [
+      /\bedu(?:cation)?\s*loan\b/i, /\bavanse\b/i,
+      /\bhdfc\s*credila\b/i, /\bauxilo\b/i,
+    ] },
+
+  // [ADD — this pass] Gold loan — new sub-category, no prior coverage.
+  { type: 'Liability', category: 'Loans', sub_category: 'Gold Loan',
+    patterns: [
+      /\bgold\s+loan\b/i, /\bmuthoot\b/i, /\bmanappuram\b/i,
+    ] },
+
+  // [ADD — this pass] BNPL — new category. Deliberately kept separate from
+  // EMI/Loans since these are typically shorter-term, smaller-ticket, and
+  // product teams often want to track them distinctly from formal lending.
+  { type: 'Liability', category: 'BNPL', sub_category: null,
+    direction: 'debit',
+    patterns: [
+      /\blazypay\b/i, /\bsimpl\b/i, /\bzestmoney\b/i,
+      /\bamazon\s*pay\s*later\b/i,
+    ] },
+
+  // [FIX — this pass] Real classification bug found via scoring-doc
+  // cross-check. Removed /\bnach\s+debit\b/i from this entry's patterns.
+  // "NACH debit" is purpose-agnostic bank terminology — it only says "this
+  // is a mandate-based auto-debit," identically for a loan EMI, a SIP, or
+  // an insurance premium. Keeping it here meant ANY unnamed NACH debit with
+  // no other identifying text (no lender/AMC/insurer name, no "sip"/
+  // "premium" wording) matched THIS entry — via the taxonomy loop, which
+  // runs before the registered_facts check in classify() — and got
+  // silently auto-labeled "Loan EMI" (Liability/debt), never reaching
+  // registered_facts at all. This is precisely the "classic ambiguous
+  // case" pileap_module_merchant_taxonomy.md says Table X exists to solve
+  // — a generic NACH SIP or insurance-premium debit with no lender/AMC/
+  // insurer name in the text — and the pattern here was quietly routing it
+  // around that mechanism entirely.
+  // Also moved to the END of the Liability/Loans block (see comment above
+  // Home Loan) so specific lender matches win array-order ties instead of
+  // this generic bucket.
+  // The remaining three patterns are kept: "EMI deducted/debited/paid" and
+  // "loan emi" both explicitly name EMI/loan, and "auto debit emi" contains
+  // "emi" explicitly too — none of these are purpose-agnostic the way bare
+  // "NACH debit" is, so they're safe to keep resolving directly via regex.
   { type: 'Liability', category: 'EMI', sub_category: 'Loan EMI',
     patterns: [/\bemi\s+(deducted|debited|paid)\b/i, /\bloan\s+emi\b/i,
-               /\bnach\s+debit\b/i, /\bauto\s+debit\s+emi\b/i] },
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Home Loan',
-    patterns: [/\bhome\s+loan\b/i, /\bhousing\s+loan\b/i, /\bmortgage\b/i] },
-
-  { type: 'Liability', category: 'Loans', sub_category: 'Personal Loan',
-    patterns: [/\bpersonal\s+loan\b/i, /\binstant\s+loan\b/i] },
+               /\bauto\s+debit\s+emi\b/i,
+               // [FIX — this pass, found via corpus test] Real template
+               // "EMI of Rs.X debited from A/c Y towards Loan A/c Z on
+               // DATE." matched neither existing pattern — "emi" and
+               // "debited" aren't adjacent (the amount clause sits
+               // between them), and there's no "loan emi" or "auto debit
+               // emi" phrase either. Bounded-distance pattern tying "emi"
+               // to a nearby "loan a/c" reference catches this without
+               // loosening to a bare \bemi\b (which risks false positives
+               // elsewhere per this file's own established caution around
+               // that word).
+               /\bemi\s+of\b.{0,60}\bloan\s+a\/?c\b/i] },
 
   // ── Asset ─────────────────────────────────────────────────────────────────
-  { type: 'Asset', category: 'Bank Deposits', sub_category: 'Fixed Deposit',
-    patterns: [/\bfixed\s+deposit\b/i, /\bfd\s+(created|booked|opened)\b/i] },
+  // [FIX — this pass, resolves a previously-flagged open question] Every
+  // entry below (Fixed Deposit, Recurring Deposit, NPS, SCSS/NSC/KVP,
+  // PPF/SSY) used to be `type: 'Asset'`, while SIP/Mutual Funds/Stocks/Gold/
+  // Bonds above are `type: 'Investment'`. That split was never a deliberate
+  // product decision — a prior comment here flagged it as unresolved. It
+  // matters because pileap_module_merchant_taxonomy.md's Module 4
+  // (Investment Rate) explicitly lists FD/RD/PPF/NPS/SCSS as feeding that
+  // score, same as SIP. If Investment Rate's rollup logic (not yet built)
+  // ends up summing `type === 'Investment'`, leaving these as `'Asset'`
+  // would silently exclude every rupee put into a fixed deposit, PPF, NPS,
+  // RD, or SCSS from the score — understating genuine saving/investing
+  // behaviour for exactly the users who favour guaranteed-return
+  // instruments over market-linked ones.
+  //
+  // Retyped to `'Investment'` to match the taxonomy doc. `category`/
+  // `sub_category` are unchanged, so nothing downstream loses the ability
+  // to tell a Fixed Deposit apart from a SIP — this only changes the
+  // top-level bucket used for "money set aside for the future" rollups
+  // (Investment Rate). `type: 'Asset'` is no longer used anywhere in this
+  // file as of this fix; if a genuine balance-sheet "Asset" concept is
+  // needed later (Module 7, Net Worth), that's explicitly [NOT SMS] per the
+  // taxonomy doc anyway — it needs a valuation snapshot, not a transaction
+  // category, so re-introducing `'Asset'` here wouldn't have served it.
+  { type: 'Investment', category: 'Bank Deposits', sub_category: 'Fixed Deposit',
+    // [FIX — this pass, found via corpus test] The real, extremely common
+    // bank template is "FD of Rs.X booked successfully, A/c Y, FD No Z,
+    // Interest Rate W% p.a., Maturity DATE" — 'FD' and 'booked' are NOT
+    // adjacent (the amount clause sits between them), so the original
+    // \bfd\s+(created|booked|opened)\b pattern never matched it at all.
+    // Added a bounded-distance variant plus the 'FD No' signal (present on
+    // every real FD-booking SMS in the corpus, low collision risk).
+    patterns: [
+      /\bfixed\s+deposit\b/i,
+      /\bfd\s+(created|booked|opened)\b/i,
+      /\bfd\b.{0,40}\bbooked\s+successfully\b/i,
+      /\bfd\s+no\.?\s*\d/i,
+    ] },
 
-  { type: 'Asset', category: 'Government Schemes', sub_category: 'NPS',
+  // [ADD — this pass] Recurring Deposit — taxonomy doc explicitly flagged
+  // this had zero pattern coverage today. Filed as its own sub_category
+  // under Bank Deposits, parallel to Fixed Deposit.
+  { type: 'Investment', category: 'Bank Deposits', sub_category: 'Recurring Deposit',
+    direction: 'debit',
+    patterns: [
+      /\brecurring\s+deposit\b/i, /\brd\s+(installment|instalment)\b/i,
+      /\brd\s+(created|booked|opened)\b/i,
+    ] },
+
+  { type: 'Investment', category: 'Government Schemes', sub_category: 'NPS',
     patterns: [/\bnps\b/i, /\bnational\s+pension\s+(scheme|system)\b/i] },
 
-  // [ADD — this pass] Asset > Government Schemes > PPF/SSY. Filed under
-  // Asset to match the existing NPS entry's type — flagging that NPS (Asset)
-  // and SIP (Investment, above) currently sit under different top-level
-  // `type`s despite being similar long-term-savings instruments; not
-  // changed here since it wasn't clear whether that split is intentional.
-  // Also acts as a safety net for transactions.ts's DEFINITIONAL_CONTRA_RULES
-  // (GENERIC_PPF_SSY), which currently has no Layer-2 rule feeding it that
-  // we can see from this file — if Layer 2 never sets matched_rule to
-  // GENERIC_PPF_SSY, this at least gets the transaction categorized instead
-  // of falling through uncategorized.
+  // [ADD — this pass] SCSS/NSC/KVP — no prior coverage at all.
+  { type: 'Investment', category: 'Government Schemes', sub_category: 'SCSS/NSC/KVP',
+    direction: 'debit',
+    patterns: [
+      /\bscss\b/i, /\bsenior\s+citizen\s+savings\s+scheme\b/i,
+      /\bnsc\b/i, /\bnational\s+savings\s+certificate\b/i,
+      /\bkvp\b/i, /\bkisan\s+vikas\s+patra\b/i,
+    ] },
+
+  // [ADD — this pass] Government Schemes > PPF/SSY. Also acts as a safety
+  // net for transactions.ts's DEFINITIONAL_CONTRA_RULES (GENERIC_PPF_SSY),
+  // which currently has no Layer-2 rule feeding it that we can see from
+  // this file — if Layer 2 never sets matched_rule to GENERIC_PPF_SSY, this
+  // at least gets the transaction categorized instead of falling through
+  // uncategorized.
   // [FIX — this pass] direction: 'debit' added. Without it, an incoming
   // transfer whose narration happens to say "PPF" (real example: a
   // person's own transfers, some captioned "PPF", others "House expenses",
   // same person/amount, only the PPF-captioned ones were affected) got
-  // classified as if the money arriving WAS a PPF asset. PPF/SSY is only
-  // ever a real asset-classification event when money is actually moving
-  // OUT to the scheme, never on the credit side — an incoming credit that
+  // classified as if the money arriving WAS a PPF contribution. PPF/SSY is
+  // only ever a real contribution event when money is actually moving OUT
+  // to the scheme, never on the credit side — an incoming credit that
   // happens to mention PPF is not itself a contribution. Matters beyond
-  // mislabeling: health-module risk/liquidity scoring reads this
-  // category, so an unrestricted credit match double-counts the same PPF
-  // contribution (once when it arrives from wherever, again when it's
-  // actually moved into PPF).
-  { type: 'Asset', category: 'Government Schemes', sub_category: 'PPF/SSY',
+  // mislabeling: health-module scoring reads this category, so an
+  // unrestricted credit match would double-count the same PPF contribution
+  // (once when it arrives from wherever, again when it's actually moved
+  // into PPF).
+  { type: 'Investment', category: 'Government Schemes', sub_category: 'PPF/SSY',
     direction: 'debit',
     patterns: [
       /\bppf\b/i, /\bpublic\s+provident\s+fund\b/i,
       /\bsukanya\s+samriddhi\b/i, /\bssy\b/i,
+    ] },
+
+  // ── Liability ─────────────────────────────────────────────────────────────
+  // [ADD — this pass] Credit Card bill payment. Previously this had NO
+  // taxonomy entry at all — layer2_ruleset.js's GENERIC_CC_PAYMENT rule
+  // correctly keeps it out of Expense (possible_contra: true, so
+  // transactions.ts marks it is_contra and it's never double-counted as
+  // spend) but sets merchant: null and channel: 'Net Banking', so it never
+  // reached the registered_facts mandate-shape gate either. Result: it
+  // resolved to category: null, type: null — invisible to Debt Ratio (Module
+  // 3) even though the taxonomy doc explicitly calls this out as a
+  // debt-servicing signal ("this is a *transfer*, not an expense; must not
+  // double-count as spend" — the doc's intent was "keep out of Expense,
+  // not "erase entirely"). Patterns mirror GENERIC_CC_PAYMENT's own
+  // proximity-based text matching so this only fires on genuine bill-payment
+  // language, not ordinary "spent on my credit card at X" POS purchases
+  // (which say "Spent"/"Txn" near "Card", never "bill"/"payment towards").
+  { type: 'Liability', category: 'Credit Card', sub_category: 'Bill Payment',
+    direction: 'debit',
+    patterns: [
+      /credit\s*card.{0,40}bill\s*payment/i,
+      /paid.{0,20}towards.{0,20}credit\s*card/i,
+      /payment.{0,20}towards.{0,20}credit\s*card/i,
+      /paid.{0,20}for.{0,20}credit\s*card/i,
+      /(?:credited|received|paid).{0,40}credit\s*card.{0,30}bill\s*payment/i,
     ] },
 ];
 
@@ -1012,7 +1551,14 @@ const TAXONOMY: TaxonomyEntry[] = [
 // Use this key — not the display merchant string — when reading/writing
 // customCatData, both on-device and in the backend.
 
-function normaliseMerchantKey(merchant: string | null): string | null {
+// [CHANGED — this pass] Exported. customCategories.ts needs to build the
+// exact same key when the user confirms a category via the contextual
+// prompt (RegisterFactPrompt), so the write and every future read agree on
+// what "the same merchant" means. Single source of truth, rather than a
+// third independent copy of this normalization living in the API layer —
+// same failure class as the categories.ts/transactionCategories.ts mismatch
+// this codebase already hit once.
+export function normaliseMerchantKey(merchant: string | null): string | null {
   if (!merchant) return null;
   return merchant
     .toLowerCase()
@@ -1023,15 +1569,21 @@ function normaliseMerchantKey(merchant: string | null): string | null {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+// [ADD — this pass] Optional second param. Callers that don't yet fetch
+// registered_facts/custom_categories can omit it entirely — every existing
+// call site keeps working unchanged; matchContext just defaults to
+// undefined, and matchCustomCategory()/matchRegisteredFact() both already
+// no-op on an empty/missing list.
 export function parseSmsMessages(
-  messages: RawMessage[]
+  messages: RawMessage[],
+  matchContext?: MatchContext,
 ): (ParsedTransaction | BalanceUpdate)[] {
-  return messages.map(msg => parseSingleSms(msg));
+  return messages.map(msg => parseSingleSms(msg, matchContext));
 }
 
 // ─── Single message orchestrator ─────────────────────────────────────────────
 
-function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
+function parseSingleSms(msg: RawMessage, matchContext?: MatchContext): ParsedTransaction | BalanceUpdate {
   const body    = msg.body;
   const isInfra = UPI_INFRA_SENDERS.some(s => msg.address.toUpperCase().includes(s));
   const msgDate = new Date(msg.date).toISOString().split('T')[0];
@@ -1062,7 +1614,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     const isCredit = l2.direction === 'credit';
     const classification = l2.suggested_category
       ? parseSuggestedCategory(l2.suggested_category)
-      : classify(body.toLowerCase(), isCredit, l2.amount, l2.channel, l2.merchant);
+      : classify(body.toLowerCase(), isCredit, l2.amount, l2.channel, l2.merchant, l2.txn_date || msgDate, l2.reference_value, matchContext);
 
     const signedAmount = isCredit ? Math.abs(l2.amount) : -Math.abs(l2.amount);
 
@@ -1080,21 +1632,31 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     // Transactions tab can surface "no category" as a lightweight
     // tap-to-tag affordance on approved rows (category IS NULL is a trivial
     // filter) — without gating the transaction's approval on it.
+    // [FIX] l2.requires_classification is derived once from the VPA handle
+    // in ruleset.js's GENERIC_CREDIT rule, independent of what classify()
+    // later resolves — so a saved custom_categories entry for a person/
+    // unknown VPA (matchCustomCategory() returning resolvedFrom:
+    // 'custom_category', ambiguous:false, meant as "confirm once, forever")
+    // never actually cleared the review requirement; only the
+    // classification?.ambiguous path was being overridden. Confirmed via
+    // real data: narasimhanpr48@okaxis stayed pending_review on every
+    // future credit even after being saved as a custom category, while the
+    // equivalent debit-side case (e.g. Zerodha, ambiguous:true on the
+    // taxonomy entry) correctly stopped needing review once resolved.
+    const isCustomResolved = classification?.resolvedFrom === 'custom_category';
     const needsReview =
       !l2.account_number_masked   ||
       Math.abs(l2.amount) >= 5000 ||
-      l2.requires_classification;
+      (l2.requires_classification && !isCustomResolved) ||
+      classification?.ambiguous   === true;
 
-    // [ADD — this pass] NACH-channel classify() fallback (see below) returns
-    // a generic "Recurring Payment > NACH Mandate" classification instead of
-    // null so the row isn't left fully uncategorized — but it's still a
-    // guess, not a confident match, so it must still route to pending_review
-    // regardless of the `!classification` check above (which would no
-    // longer fire since classification is non-null here). forcedReview
-    // covers that case explicitly.
+    // [FIX] classify()'s NACH fallback no longer returns a placeholder
+    // category (see classify() comment) — recompute the same "unresolved
+    // mandate debit, still needs the registered-fact prompt" signal
+    // directly off l2.channel and the absence of any real classification,
+    // instead of pattern-matching a category string that no longer exists.
     const isUnconfidentNachGuess =
-      classification?.category === 'Recurring Payment' &&
-      classification?.sub_category === 'NACH Mandate';
+      !isCredit && l2.channel === 'NACH' && !classification;
 
     return {
       kind:                   'transaction',
@@ -1116,12 +1678,21 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
       ref_type:               l2.ref_type,
       matched_rule:           l2.matched_rule,
       confidence:             l2.confidence,
-      requires_classification: l2.requires_classification || isUnconfidentNachGuess,
+      requires_classification: (l2.requires_classification && !isCustomResolved) || isUnconfidentNachGuess || classification?.ambiguous === true,
       possible_contra:        l2.possible_contra,
       txn_group_id:           null,
       is_infrastructure:      isInfra,
       health_module_tag:      null,
-      parse_failure:          null,
+      // [FIX] Was hardcoded null. This is now the only place "unresolved
+      // mandate debit, category deliberately withheld pending the
+      // registered-fact prompt" is recorded on the persisted row — same
+      // convention transactions.ts already uses for
+      // 'awaiting_bank_confirmation' (a different "flagged, needs special
+      // handling later" case). TransactionRow.tsx's qualifiesForRegisteredFact
+      // reads this instead of category/sub_category to decide whether to
+      // show the "What's this?" callout.
+      parse_failure:          isUnconfidentNachGuess ? 'unresolved_mandate' : null,
+      resolvedFrom:            classification?.resolvedFrom,
       raw_text:               body,
     };
   }
@@ -1136,7 +1707,7 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
   }
 
-  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel, extracted.merchant);
+  const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel, extracted.merchant, msgDate, extracted.reference_value, matchContext);
 
   if (!classification) {
     return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
@@ -1148,7 +1719,8 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
 
   const needsReview =
     !extracted.accountLast4 ||
-    Math.abs(extracted.amount) >= 5000;
+    Math.abs(extracted.amount) >= 5000 ||
+    classification.ambiguous === true;
 
   return {
     kind:                   'transaction',
@@ -1170,12 +1742,13 @@ function parseSingleSms(msg: RawMessage): ParsedTransaction | BalanceUpdate {
     ref_type:                extracted.ref_type,
     matched_rule:            null,
     confidence:              0.7,
-    requires_classification: false,
+    requires_classification: classification.ambiguous === true,
     possible_contra:         false,
     txn_group_id:            null,
     is_infrastructure:       isInfra,
     health_module_tag:       null,
     parse_failure:           null,
+    resolvedFrom:            classification.resolvedFrom,
     raw_text:                body,
   };
 }
@@ -1250,10 +1823,43 @@ function extractFields(body: string): ExtractedFields {
     channel:      detectChannel(bodyUpper),
     balance:      extractBalance(body),
     ...extractRefNumber(body),
+    reference_value: extractReferenceValue(body),
   };
 }
 
+// [ADD] Local mirror of layer2_ruleset.js's extractReferenceValue() — this
+// file's own convention (see extractRefNumber below, already duplicated
+// independently for the same reason) is to keep the Layer-2 and taxonomy-
+// fallback extractors independent rather than importing across the
+// boundary, so this pattern is duplicated deliberately, not by oversight.
+// Same generic-label design as the Layer 2 version: UMRN/Mandate ID/Policy
+// No/Folio No/etc. all captured as one unlabeled reference_value, since
+// registered_facts doesn't care what the bank called it, only that it's a
+// stable, reusable identifier.
+const REFERENCE_LABELS =
+  /\b(?:UMRN|Mandate\s*ID|Policy\s*No\.?|Folio\s*No\.?|Loan\s*A\/c\.?|Mandate\s*Ref(?:erence)?)\s*[:\s]\s*([A-Za-z0-9]{4,25})\b/i;
+
+function extractReferenceValue(body: string): string | null {
+  const m = body.match(REFERENCE_LABELS);
+  return m ? m[1] : null;
+}
+
 function extractAmount(body: string): number | null {
+  // [FIX — this pass, found via corpus test] Same Lakh/Crore multiplier bug
+  // as layer2_ruleset.js's extractAmount() — see that file's comment for
+  // the full explanation. Fixed here too since this file's own convention
+  // (see extractReferenceValue() above) is to keep the two independent
+  // extractors in sync rather than importing across the Layer 2 /
+  // taxonomy-fallback boundary.
+  const lakhCrore = body.match(/(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)\s*(lakhs?|crores?)\b/i);
+  if (lakhCrore) {
+    const raw = parseFloat(lakhCrore[1].replace(/,/g, ''));
+    if (raw > 0) {
+      const multiplier = /crore/i.test(lakhCrore[2]) ? 10000000 : 100000;
+      return raw * multiplier;
+    }
+  }
+
   const patterns = [
     /INR\s+([\d,]+(?:\.\d{1,2})?)/i,
     /Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i,
@@ -1283,6 +1889,25 @@ function extractDirection(bodyLower: string): boolean | null {
     'transferred to', 'sent to', 'purchase', 'charged',
     'emi due', 'emi paid', 'emi deducted', 'premium of',
     'paid to', 'paid via', 'paid for', 'paid towards', 'used for', 'cleared',
+    // [FIX — this pass, found via corpus test] 'has been paid from A/c' —
+    // the whole "Your insurance premium Rs.X towards <insurer> Policy...
+    // has been paid from A/c Y" template family (used across every insurer
+    // in the corpus: SBI Life, HDFC Life, ICICI Prudential Life, LIC of
+    // India, Max Life) has no Layer 2 rule at all, and this fallback didn't
+    // recognize "paid from" as distinct from "paid to/via/for/towards" —
+    // was escalating as unknown_direction regardless of which insurer was
+    // named, i.e. this wasn't actually an LIC-specific gap, it was a
+    // whole-template-family miss that the earlier LIC-only regex fix
+    // didn't fully close on its own.
+    'paid from',
+    // [FIX — this pass] 'FD of Rs.X booked
+    // successfully...' has neither a Layer 2 rule nor a debit keyword this
+    // fallback recognized — it was escalating with parse_failure:
+    // 'unknown_direction' instead of resolving as the debit it actually is
+    // (money leaving the account into the new FD/RD). 'booked successfully'
+    // is specific to deposit-booking confirmations in this corpus, low
+    // collision risk in a financial-SMS-only fallback.
+    'booked successfully',
   ];
   const creditKw = [
     'credited', 'received', 'deposited', 'refund', 'salary',
@@ -1334,6 +1959,18 @@ function extractMerchant(body: string): string | null {
   if (atMatch) return atMatch[1].trim();
   const towardsMatch = body.match(/towards\s+([A-Za-z0-9 &._-]{2,40})(?:\s+on|\s+for|[,.])/i);
   if (towardsMatch) return towardsMatch[1].trim();
+  // [ADD] "Sent Rs.X\nFrom BANK A/C *NNNN\nTo NAME\nOn DD/MM/YY\nRef ..." —
+  // a real P2P UPI template (bank-transfer style "Sent" SMS) with no VPA
+  // domain, no "at", and no "towards" — none of the three patterns above
+  // match it, so merchant was silently coming back null for every message
+  // of this shape (confirmed against real data: e.g. "To Pradap R\nOn
+  // 25/07/26" — extractMerchant() returned null, which meant
+  // matchCustomCategory() could never fire for it either, since it
+  // short-circuits on a missing merchant). Anchored on the following
+  // "On DD/MM/YY" line specifically, so this doesn't fire on unrelated "to"
+  // phrases elsewhere in a message that aren't this template.
+  const sentToMatch = body.match(/\bTo\s+([A-Za-z0-9 &._-]{2,40})\s*[\r\n]+\s*On\s+\d{1,2}\/\d{1,2}\/\d{2,4}/i);
+  if (sentToMatch) return sentToMatch[1].trim();
   return null;
 }
 
@@ -1377,91 +2014,185 @@ function extractRefNumber(body: string): Pick<ExtractedFields, 'ref_number' | 'r
 
 // ─── Taxonomy classifier ──────────────────────────────────────────────────────
 
-// [FIX — this pass] Every pattern in TAXONOMY is \b-bounded, which only ever
-// matches merchant names embedded in naturally spaced bank text ("To ADYAR
-// ANANDA BHAVAN SWEET On..."). It structurally cannot match the same real
-// merchant when a different SMS template glues the name together with no
-// separators (UPI-handle / POS-terminal style: "At adyaranandabhavanswe.6325
-// by UPI...") — "bhavan" has word characters on both sides there, so no \b
-// transition exists, no matter how many merchant strings get added to the
-// list. Confirmed on 988 real transactions across two users: the same real
-// merchant (Amazon, Google Play, Decathlon, Adyar Ananda Bhavan, Aakash
-// Hospital...) classifies correctly under one SMS template and silently
-// falls through to unclassified under the other, purely because of spacing.
+// [REMOVED — this pass] This file used to carry a "loose match" fallback:
+// every \b-bounded TAXONOMY pattern also got tested, boundary-stripped,
+// against the isolated merchant field alone — added because some SMS
+// templates glue merchant names together with no separators (UPI-handle/
+// POS-terminal style: "adyaranandabhavanswe.6325"), where a normal \b...\b
+// pattern structurally can't match even though the real merchant is right
+// there in the text.
 //
-// Fix: a second pass, scoped ONLY to the isolated merchant field (never the
-// full body), tests a boundary-stripped ("loose") version of the same
-// pattern against a space-stripped merchant string. Scoping to merchant-only
-// — not the whole message — is deliberate and load-bearing: an earlier
-// version of this fix tested loosened patterns against the whole body and
-// caused real regressions (e.g. /\brefund\b/i, boundary-stripped, became a
-// bare substring match that also fired on "refunded" — a word the taxonomy
-// deliberately keeps as a separate pattern — double-counting one narrative
-// word as two pattern hits and flipping an already-correct classification).
-// Narrative/context patterns (refund, refunded, salary, meal, dining...)
-// only ever run against the properly-spaced full body, exactly as before.
-// Only patterns representing merchant-identity keywords get the loose
-// merchant-only pass, and only when the normal pass already failed.
-//
-// LOOSE_MATCH_DENYLIST — patterns unsafe to loosen even scoped to merchant-
-// only: complete standalone short brand tokens that are also common Indian
-// name/word roots (e.g. "dhan" — the Dhan trading app — is a common root in
-// names like Dhanalakshmi, Dhanush; boundary-stripped it false-matched real
-// unrelated person/store names in live data). Verified by testing every
-// pattern in TAXONOMY against every real unclassified merchant/person name
-// across two independent users' full transaction history — this was the
-// only genuine collision found. Re-run that same check before trusting any
-// newly-added pattern; add to this set if it turns up another one.
-// [FIX — this pass] Added \bspa\b. Confirmed real bug: boundary-stripped,
-// "spa" substring-matches inside "yespay" (the bank-domain suffix on
-// flipkart.hypg@yespay), mislabeling genuine Flipkart refund credits as
-// "Personal Care". Same collision class as the existing "dhan" entry —
-// a short, common-letter-sequence pattern that reads fine word-bounded
-// but false-positives constantly once boundaries are stripped.
-const LOOSE_MATCH_DENYLIST = new Set<string>([
-  '\\bdhan\\b',
-  '\\bspa\\b',
-]);
+// Removed after a real-data test (1,127 deduped messages across two users'
+// full history) found it was responsible for exactly ONE classification in
+// the entire corpus — and that one case turned out to be a plain
+// pluralization gap (\brefund\b vs "refunds"), fixed directly above by
+// adding the plural pattern, not a genuine need for substring matching.
+// Meanwhile every pattern in TAXONOMY (414 of 416, once the length-based
+// LOOSE_MATCH_DENYLIST safeguard is factored in) was eligible for this
+// fallback — a wide, open-ended collision surface for one confirmed
+// benefit. It already caused one real bug (\bspa\b matching inside
+// "flipkart.hypg@yespay", mislabeling a refund credit as a personal-care
+// debit) before being patched with a denylist entry + a minimum-length
+// floor. Decision: direct \b...\b matches only from here on. A glued/
+// no-separator merchant name that no direct pattern recognizes now falls
+// through to pending_review, same as any other unrecognized message —
+// resolvable via custom_categories once, remembered forever after, which
+// didn't exist yet when the loose-match fallback was first built and is a
+// strictly better fit for "genuinely novel merchant text" than a regex
+// guessing at fused strings ever was.
 
-// [ADD — this pass] General safeguard alongside the denylist above, for
-// the same bug class rather than one more entry per incident. Checked
-// against every real merchant string in the corpus: every pattern with a
-// stripped alnum core of 3 characters or fewer that WAS needed via loose
-// matching (i.e. didn't already match directly on the full message body)
-// turned out to be an accidental collision ("spa" in "yespay") — while
-// every pattern of 4+ characters that loose-matched turned out to be a
-// genuine hit (e.g. "bond" inside a glued "...INDIABONDPRIVA..." payee
-// name — a real bonds platform, correctly identified). A flat length
-// floor isn't a perfect substitute for actually checking real data before
-// trusting a new pattern, but it closes off the specific risk class that
-// caused the "spa" bug automatically, for every future pattern, without
-// waiting for it to mislabel a real transaction first.
-const MIN_LOOSE_MATCH_CORE_LENGTH = 4;
-
-function looseCoreLength(pattern: RegExp): number {
-  return pattern.source.replace(/[^a-zA-Z0-9]/g, '').length;
+// [ADD] custom_categories lookup — direct merchant_key match. Takes priority
+// over everything else in classify(): if the user already told us once what
+// a merchant means (either a [CUSTOM] case like a P2P payee, or an
+// [ambiguous] case like Zerodha), that stands, regardless of what the regex
+// would otherwise guess. This is the "confirm once, forever" mechanism.
+// [CHANGED — this pass] Exported. transactions.ts's reconcilePendingTransactions()
+// needs to re-run this same check against already-stored pending rows, not
+// just at parse time — single source of truth for "what counts as a match,"
+// same reasoning as normaliseMerchantKey() being shared rather than
+// duplicated.
+export function matchCustomCategory(
+  merchant: string | null | undefined,
+  customCategories?: CustomCategoryEntry[],
+): Classification | null {
+  if (!customCategories?.length || !merchant) return null;
+  const key = normaliseMerchantKey(merchant);
+  if (!key) return null;
+  const match = customCategories.find(c => c.merchant_key === key);
+  if (!match) return null;
+  return {
+    type:         match.type,
+    category:     match.category,
+    sub_category: match.sub_category,
+    ambiguous:    false,
+    resolvedFrom: 'custom_category',
+  };
 }
 
-const looseVariantCache = new WeakMap<RegExp, RegExp>();
-
-function toLooseVariant(pattern: RegExp): RegExp {
-  const cached = looseVariantCache.get(pattern);
-  if (cached) return cached;
-  // Drop \b anchors (no boundaries exist in a glued string) and \s+/\s*
-  // (no separators exist either), so the same keyword still matches once
-  // merchant text has been fused together by the SMS template.
-  const looseSource = pattern.source
-    .replace(/\\b/g, '')
-    .replace(/\\s\+/g, '')
-    .replace(/\\s\*/g, '');
-  const loose = new RegExp(looseSource, pattern.flags);
-  looseVariantCache.set(pattern, loose);
-  return loose;
+// [ADD] registered_facts lookup — for the case custom_categories can't
+// handle: merchant identity itself is unrecoverable from the SMS (generic
+// NACH debit via a clearing house). Three tiers, in order:
+//   1. reference_value exact match — if the SMS carried a UMRN/Mandate ID/
+//      Policy No/etc. and it matches a stored fact exactly, that's certain.
+//   2. [CHANGED] amount + merchant_key, both required — a recurring
+//      payment can be weekly/monthly/quarterly, so a day-of-month window
+//      was never a reliable "same fact" signal on its own; merchant_key
+//      is the stronger pairing with amount. If more than one fact matches
+//      within tolerance, deliberately do NOT guess between them —
+//      ambiguous matches return null, same as "no match", and fall
+//      through to the generic guess / eventual Haiku escalation rather
+//      than picking wrong. (Caveat: two genuinely different facts routed
+//      through the same clearing-house gateway could in principle share
+//      an identical generic merchant string, collapsing their
+//      merchant_key — amount still has to also match for a false
+//      collision here, so this is unlikely in practice, but worth knowing
+//      if it ever comes up in real data.)
+//   3. no match — return null, caller falls back to the generic NACH-guess
+//      label (still forces pending_review, same as before this existed).
+//
+// [KEPT — unused by matchRegisteredFact() below, retained in case
+// day-tolerance matching ever needs to be revisited]
+function dayOfMonthFrom(txnDate?: string | null): number | null {
+  if (!txnDate) return null;
+  const day = new Date(txnDate).getUTCDate();
+  return isNaN(day) ? null : day;
 }
 
-function toNoSpaceMerchant(merchant: string | null | undefined): string {
-  if (!merchant) return '';
-  return merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
+// [FIX — found during audit] Plain Math.abs(day1 - day2) breaks at every
+// month boundary: a NACH mandate set to debit on the 1st that actually
+// processes on the 29th (3 days early, having slipped into the previous
+// month around a weekend/bank holiday — a routine, common pattern, not an
+// edge case) computed as 28 days apart instead of 3, so it never matched
+// even a generous day_tolerance. Treats the day-of-month as circular
+// (cycle length 31, the max possible month length) so wraparound distances
+// resolve correctly. Slightly generous near shorter months (e.g. Feb) but
+// that only ever makes tolerance MORE liberal, never less — consistent
+// with the project's "liberal matching" decision, and the failure mode of
+// being too liberal here is "asks to confirm one fewer time," not
+// "silently miscategorizes," since a single match is still required.
+function dayDistance(day1: number, day2: number): number {
+  const diff = Math.abs(day1 - day2);
+  return Math.min(diff, 31 - diff);
+}
+
+// [CHANGED — this pass] Exported, same reasoning as matchCustomCategory()
+// above — reused by transactions.ts's reconcilePendingTransactions().
+export function matchRegisteredFact(
+  amount: number,
+  merchant: string | null | undefined,
+  referenceValue: string | null | undefined,
+  registeredFacts?: RegisteredFact[],
+): Classification | null {
+  if (!registeredFacts?.length) return null;
+
+  // [CHANGED — this pass] Tier 1 — reference match. Previously assumed a
+  // UMRN/Mandate ID collision between two different real-world facts would
+  // be "vanishingly unlikely" and matched on reference_value ALONE via
+  // .find(), returning whichever fact happened to come back first from the
+  // query (fetchActiveRegisteredFacts() has no .order(), so that's not even
+  // deterministic). Confirmed as a real, reachable bug against actual test
+  // data: three registered facts sharing one reused UMRN caused every debit
+  // against that reference — regardless of its actual amount — to resolve
+  // to whichever fact's row order won, once even mapping a ₹500 EMI onto a
+  // "Mutual Funds" fact. Now requires amount to also fall within tolerance,
+  // and — same discipline as Tier 2 below — if more than one fact still
+  // qualifies, that's genuine ambiguity: don't guess, return null and let
+  // it fall through instead of silently picking one.
+  if (referenceValue) {
+    const refCandidates = registeredFacts.filter(f => {
+      if (f.reference_value !== referenceValue) return false;
+      return (
+        f.expected_amount == null ||
+        Math.abs(amount - f.expected_amount) <= f.amount_tolerance
+      );
+    });
+    if (refCandidates.length === 1) {
+      const exact = refCandidates[0];
+      return {
+        type:         exact.resolved_type,
+        category:     exact.resolved_category,
+        sub_category: exact.resolved_sub_category,
+        ambiguous:    false,
+        resolvedFrom: 'registered_fact',
+      };
+    }
+    // refCandidates.length > 1 (genuine reference collision at this
+    // amount) falls through to Tier 2 below, which may still disambiguate
+    // via merchant_key even where amount+reference alone couldn't.
+  }
+
+  // [CHANGED] Tier 2 — amount + merchant_key, both required. Day-of-month
+  // dropped (see this function's header comment above for why). Collect
+  // ALL candidates that qualify on both; only resolve if exactly one does.
+  const merchantKey = normaliseMerchantKey(merchant ?? null);
+  const candidates = registeredFacts.filter(f => {
+    const amountOk =
+      f.expected_amount == null ||
+      Math.abs(amount - f.expected_amount) <= f.amount_tolerance;
+    // A fact with no merchant_key on file (confirmed before this field
+    // existed, or a transaction with no merchant text at all) can't be
+    // matched on this tier — falls through to "no match" rather than
+    // silently matching on amount alone, which would reintroduce exactly
+    // the ambiguity this tier exists to avoid.
+    const merchantOk =
+      !!f.merchant_key && !!merchantKey && f.merchant_key === merchantKey;
+    return amountOk && merchantOk;
+  });
+
+  if (candidates.length === 1) {
+    const f = candidates[0];
+    return {
+      type:         f.resolved_type,
+      category:     f.resolved_category,
+      sub_category: f.resolved_sub_category,
+      ambiguous:    false,
+      resolvedFrom: 'registered_fact',
+    };
+  }
+
+  // Zero or multiple candidates — don't guess. Falls through to the
+  // existing generic NACH-guess label below.
+  return null;
 }
 
 // [FIX — this pass] Added optional `channel` param, used only for the NACH
@@ -1473,15 +2204,69 @@ function toNoSpaceMerchant(merchant: string | null | undefined): string {
 // [FIX — this pass] Added optional `merchant` param, used only for the
 // merchant-scoped loose-match fallback described above. Every existing call
 // site is updated to pass it through (l2.merchant or extracted.merchant).
+//
+// [ADD — this pass] Added optional `txnDate`, `referenceValue`, and
+// `matchContext` params. All optional, all default to no-op when omitted —
+// [ADD] VPA local-part fallback — narrowly scoped substring match, only for
+// UPI-style messages (text containing '<local-part>@<handle>'), and only
+// against the local-part BEFORE the '@' — never the handle/PSP suffix
+// after it. This deliberately excludes the exact text region where the
+// only historically-confirmed collision bug happened (\bspa\b matching
+// inside "yespay", which is the PSP handle AFTER '@', not the merchant
+// identifier before it) — scoping here structurally can't reproduce that
+// specific bug, not just makes it less likely.
+//
+// UPI VPA local-parts commonly glue a merchant name directly onto a
+// sequence number ("swiggy1", "kfcindia53") with no character-level
+// boundary between them — digits are word characters, so no \b...\b
+// pattern can ever bridge that gap regardless of how it's authored.
+// Strip digits/punctuation from the local-part first, then test each
+// pattern's un-boundaried core as a substring against what's left.
+//
+// [FLAG] This still carries the same class of collision risk the removed
+// loose-matching had, just scoped far narrower (before-@ text only, UPI
+// messages only, verified against 6,127 real messages before shipping —
+// see commit notes). That verification doesn't transfer automatically to
+// future patterns: re-check against real data whenever a new short
+// pattern is added to TAXONOMY. It also assumes TAXONOMY patterns stay in
+// the simple \bword\b literal shape that's dominant today — if patterns
+// shift toward heavier alternations/lookaheads, toLooseVariant() below
+// may stop extracting a meaningful core from them and this should be
+// revisited.
+function extractVpaLocalPart(body: string): string {
+  const m = body.match(/\b([a-z0-9][a-z0-9._:+-]{1,40})@[a-z0-9.]+\b/i);
+  if (!m) return '';
+  return m[1].toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function toLooseVariant(pattern: RegExp): RegExp {
+  const looseSource = pattern.source
+    .replace(/\\b/g, '')
+    .replace(/\\s\+/g, '')
+    .replace(/\\s\*/g, '');
+  return new RegExp(looseSource, pattern.flags);
+}
+
+// [Layer 2 / TAXONOMY fallback boundary — classify() below is the entry
+// every existing call site keeps working unchanged if it doesn't pass them.
+// See matchCustomCategory()/matchRegisteredFact() above for what each does.
 function classify(
   bodyLower: string,
   isCredit: boolean,
   amount: number,
   channel?: string | null,
   merchant?: string | null,
+  txnDate?: string | null,
+  referenceValue?: string | null,
+  matchContext?: MatchContext,
 ): Classification | null {
+  // [ADD] custom_categories always wins first — a past user decision
+  // overrides any regex guess, ambiguous or not.
+  const customMatch = matchCustomCategory(merchant, matchContext?.customCategories);
+  if (customMatch) return customMatch;
+
   const direction = isCredit ? 'credit' : 'debit';
-  const merchantNoSpace = toNoSpaceMerchant(merchant);
+  const vpaLocalPart = extractVpaLocalPart(bodyLower);
   let bestEntry: TaxonomyEntry | null = null;
   let bestScore = 0;
 
@@ -1491,9 +2276,8 @@ function classify(
     if (entry.minAmount !== undefined && amount < entry.minAmount) continue;
     const score = entry.patterns.filter(p => {
       if (p.test(bodyLower)) return true;
-      if (!merchantNoSpace || LOOSE_MATCH_DENYLIST.has(p.source)) return false;
-      if (looseCoreLength(p) < MIN_LOOSE_MATCH_CORE_LENGTH) return false;
-      return toLooseVariant(p).test(merchantNoSpace);
+      if (!vpaLocalPart) return false;
+      return toLooseVariant(p).test(vpaLocalPart);
     }).length;
     if (score > bestScore) { bestScore = score; bestEntry = entry; }
   }
@@ -1503,27 +2287,78 @@ function classify(
       type:         bestEntry.type,
       category:     bestEntry.category,
       sub_category: bestEntry.sub_category,
+      ambiguous:    bestEntry.ambiguous || false,
     };
   }
 
-  // [ADD — this pass] NACH fallback. No text pattern matched anything, but
-  // Layer 2 (or extractFields()) already told us this is a NACH mandate
-  // debit — a real, recurring, non-P2P payment to a registered entity
-  // (typically a clearing house acting on behalf of a SIP/insurance/EMI
-  // mandate; live data showed "INDIAN CLEARING CORP LTD" as 100% of NACH
-  // matches, 20 of 259 transactions in one 90-day sample, all previously
-  // uncategorized). Rather than leave this fully blank, return a generic
-  // label — the caller (parseSingleSms) still forces pending_review for
-  // this specific classification via isUnconfidentNachGuess, so this is a
-  // helpful default label, not a confident auto-approval.
-  if (!isCredit && channel === 'NACH') {
-    return {
-      type:         'Liability',
-      category:     'Recurring Payment',
-      sub_category: 'NACH Mandate',
-    };
+  // [FIX — corrected after a real regression, audit this carefully before
+  // touching again] registered_facts fallback — precisely scoped to
+  // recurring-mandate-shaped debits, NOT "any debit regex failed to
+  // classify."
+  //
+  // History of getting this gate right took two attempts:
+  //   1st: gated on channel === 'NACH' only — too narrow, missed UPI
+  //        Mandate execution SMS (extractChannel() deliberately tags these
+  //        channel:'UPI', not 'NACH') and the separate 'EMI' channel value.
+  //   2nd: removed the channel check entirely ("any unclassified debit") —
+  //        too broad. Confirmed via real-corpus regression: ordinary P2P
+  //        transfers and shop purchases (a payment to "B SHAM KUMAR", a
+  //        purchase at "NEW RAHMAN PLAZA") started resolving as "Mutual
+  //        Funds/SIP" purely because their amount+day coincidentally fell
+  //        within tolerance — these have perfectly identifiable merchant
+  //        text, they just lack a regex pattern. That's custom_categories'
+  //        job (the [CUSTOM] bucket), not registered_facts' — registered_
+  //        facts exists ONLY for debits that are structurally
+  //        mandate/recurring-shaped but withhold WHO, not for "any
+  //        merchant regex hasn't been taught yet."
+  //   3rd (this one): explicit allowlist of recurring-mandate shapes —
+  //        NACH, the bare 'EMI' channel, or a UPI Mandate execution SMS
+  //        (re-derived here via the same "UPI Mandate:" prefix
+  //        extractChannel() uses to route these to channel:'UPI' in the
+  //        first place — that routing decision was made for its own
+  //        reason and isn't being undone, just recognized here too).
+  const isRecurringMandateShape =
+    channel === 'NACH' ||
+    channel === 'EMI' ||
+    /^upi mandate:/im.test(bodyLower);
+
+  if (!isCredit && isRecurringMandateShape) {
+    const factMatch = matchRegisteredFact(amount, merchant, referenceValue, matchContext?.registeredFacts);
+    if (factMatch) return factMatch;
   }
 
+  // [ADD — this pass] NACH fallback. No text pattern matched anything, and
+  // no registered_facts match resolved it either, but Layer 2 (or
+  // extractFields()) already told us this is a NACH mandate debit — a
+  // real, recurring, non-P2P payment to a registered entity (typically a
+  // clearing house acting on behalf of a SIP/insurance/EMI mandate; live
+  // data showed "INDIAN CLEARING CORP LTD" as 100% of NACH matches, 20 of
+  // 259 transactions in one 90-day sample, all previously uncategorized).
+  // Rather than leave this fully blank, return a generic label — the
+  // caller (parseSingleSms) still forces pending_review for this specific
+  // classification via isUnconfidentNachGuess, so this is a helpful
+  // default label, not a confident auto-approval. Deliberately stays
+  // NACH-only — unlike the registered_facts check above, this label would
+  // be a FALSE statement for a UPI/EMI-channel debit, so it must not
+  // apply there; those simply return null below and fall through to
+  // whatever downstream handling already exists for unclassified debits
+  // (same as before this feature existed).
+  // [FIX] Previously returned a placeholder { type: 'Liability', category:
+  // 'Recurring Payment', sub_category: 'NACH Mandate' } here instead of
+  // null — meant as "don't leave it fully blank," but this actively
+  // corrupts health-module scoring (Debt Ratio, Investment Rate, Income
+  // Stability all read type/category straight off the transactions table
+  // per pileap_scoring_reality_check.pdf's weighted_emi/investment-rate/
+  // income-CV formulas). An unresolved SIP, insurance premium, or even a
+  // non-financial subscription mandate (e.g. a SaaS auto-pay) would get
+  // counted as debt in Debt Ratio while simultaneously NOT counting toward
+  // Investment Rate — a double-direction error on the same money, and for
+  // exactly the transactions still awaiting the user's own answer via
+  // RegisterFactPrompt. Returns null now, same treatment as any other
+  // genuinely uncategorized debit; parseSingleSms tracks "this still needs
+  // the registered-fact prompt" via isUnconfidentNachGuess (recomputed off
+  // l2.channel there, not off this return value) instead of via a fake
+  // category.
   return null;
 }
 

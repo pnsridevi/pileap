@@ -148,7 +148,20 @@ function passesLayer1Filter(body) {
       ((b.includes("pf contribution") || b.includes("epf contribution")) &&
        (b.includes("credited to your pf") || b.includes("credited to your epf") || b.includes("passbook"))) ||
       b.includes("epfo youtube") ||
-      (b.includes("please complete the transaction") && b.includes("link is valid"))) {
+      (b.includes("please complete the transaction") && b.includes("link is valid")) ||
+      // [ADD] Fee/limit policy notices — e.g. "UPI cash withdrawals at ATMs
+      // will be part of monthly free ATM txn limits. Rs. 23+tax per txn
+      // will apply post free limit." These are forward-looking policy
+      // announcements, not a transaction, but the bare hasDirectionSignal
+      // check further below does b.includes("withdrawal"), which matches
+      // the substring "withdrawal" inside "withdrawals" here — turning a
+      // general statement about a fee schedule into a phantom transaction
+      // (confirmed real case: this exact message landed as a fake -₹23
+      // debit). Scoped narrowly to the "w.e.f./effective from" + "will
+      // apply" construction so real "Cash withdrawal of Rs.X..." messages
+      // (which never use this future-tense policy phrasing) are unaffected.
+      ((b.includes("w.e.f") || b.includes("effective from")) && b.includes("will apply")) ||
+      b.includes("free atm txn limit")) {
     return { pass: false, reason: 'service_noise' };
   }
 
@@ -190,6 +203,17 @@ function passesLayer1Filter(body) {
     /\bAC\s+[Xx*]{1,4}\d{4}\s+(?:DR|CR)\s+RS\.?\s*\d/i.test(b) ||
     b.includes("collected as") ||
     b.includes("disbursed") ||
+    // [ADD] Vendor/payee-side payment confirmations — e.g. "We confirm
+    // receipt of Rs. 28658.18 towards ManipalCigna proposal no. :
+    // LIFETM050002204." Real gap: this exact template was falling through
+    // as no_signal and being permanently lost. Unlike the already-handled
+    // payee-ack phrases (isPayeeAck below), this one has no companion
+    // check that drops it as redundant, so letting it through here is
+    // safe — Layer 2's PAYMENT_CONFIRMATION_NOTICE rule + transactions.ts
+    // reconciliation is what prevents it from double-counting alongside a
+    // matching real bank debit, mirroring the existing provisional-credit
+    // pattern (IRCTC refunds, vendor settlements) but for the debit side.
+    /\bconfirm(?:ed)?\s+receipt\s+of\b/i.test(b) ||
     b.includes("added to") ||
     b.includes("used for") ||
     /using\s+\w[\w\s]*card\s+\w*\s*for\s+rs/i.test(b) ||

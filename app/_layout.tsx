@@ -1,3 +1,14 @@
+import { Alert } from 'react-native';
+if (typeof ErrorUtils !== 'undefined') {
+  const defaultHandler = ErrorUtils.getGlobalHandler();
+  ErrorUtils.setGlobalHandler((error, isFatal) => {
+    Alert.alert(
+      isFatal ? 'Fatal Error' : 'Error',
+      `${error.name}: ${error.message}\n\n${error.stack?.slice(0, 800)}`
+    );
+    defaultHandler(error, isFatal);
+  });
+}
 import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';

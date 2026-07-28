@@ -73,8 +73,15 @@ const POSITIVE_SUB_CATEGORIES = new Set([
 
 export const TAXONOMY: Record<TxnType, CategoryDef[]> = {
   Expense: [
+    // [CHANGE] Promoted out of Food & Dining into its own top-level
+    // category — mirrors Shopping (Amazon/Flipkart/Myntra/Nykaa/Meesho all
+    // co-equal merchants under one category). Zepto, Blinkit, Swiggy
+    // Instamart, and Dunzo all land here now instead of Zepto having its
+    // own separate category. Matches smsParser.ts's consolidated entry.
+    { category: 'Quick Commerce', color: '#0DA6A0',
+      subCategories: ['Instant Delivery'] },
     { category: 'Food & Dining', color: '#E8590C',
-      subCategories: ['Quick Commerce', 'Restaurants', 'Groceries', 'Milk & Dairy'] },
+      subCategories: ['Restaurants', 'Groceries', 'Milk & Dairy'] },
     { category: 'Entertainment', color: '#D6336C',
       subCategories: ['OTT Subscriptions', 'Movies & Events'] },
     { category: 'Shopping', color: '#AE3EC9',
@@ -138,22 +145,44 @@ export const TAXONOMY: Record<TxnType, CategoryDef[]> = {
     { category: 'Bonds', color: '#7950F2',
       subCategories: ['Bond Purchase'] },
     { category: 'Insurance', color: '#364FC7',
-      subCategories: ['Life Insurance', 'Health Insurance', 'Motor Insurance'] },
+      // 'Annuity/Pension' — [ADD, this pass] mirrors smsParser.ts's new entry.
+      // 'Other Insurance' — [ADD] manual-only; RegisterFactPrompt.tsx's
+      // INSURANCE_TYPES 'Other' option writes exactly this sub_category
+      // when the insurer isn't in the dropdown roster. Same reasoning as
+      // 'Other Loan' above.
+      subCategories: ['Life Insurance', 'Health Insurance', 'Motor Insurance', 'Annuity/Pension', 'Other Insurance'] },
   ],
   Liability: [
     { category: 'EMI', color: '#E03131',
       subCategories: ['Loan EMI'] },
     { category: 'Loans', color: '#C2255C',
-      subCategories: ['Home Loan', 'Personal Loan'] },
+      // 'Auto Loan', 'Education Loan', 'Gold Loan' — [ADD, this pass]
+      // mirror smsParser.ts's three new Loans sub-categories.
+      // 'Other Loan' — [ADD] manual-only; RegisterFactPrompt.tsx's
+      // LOAN_CATEGORIES 'Other' option (isSecuredDebt: null — genuinely
+      // unknown, not defaulted to either side) writes exactly this
+      // sub_category when the user can't identify their lender. Was
+      // missing here despite being a real, reachable value — same failure
+      // class this file's own header comment describes fixing once
+      // already: EditModal's subcategory chips are built from this list,
+      // so a resolved-but-unlisted sub_category rendered with no chip
+      // selected, and tapping any chip would silently overwrite it.
+      subCategories: ['Home Loan', 'Personal Loan', 'Auto Loan', 'Education Loan', 'Gold Loan', 'Other Loan'] },
     { category: 'Recurring Payment', color: '#9C36B5',
       subCategories: ['NACH Mandate'] },
+    // [ADD — this pass] BNPL — new category, mirrors smsParser.ts's new
+    // Liability > BNPL entry. Color chosen distinct from every existing
+    // category color in this file.
+    { category: 'BNPL', color: '#F76707' },
   ],
   Asset: [
     { category: 'Bank Deposits', color: '#1864AB',
-      // 'FD Maturity' — manual only.
-      subCategories: ['Fixed Deposit', 'FD Maturity'] },
+      // 'FD Maturity' — manual only. 'Recurring Deposit' — [ADD, this
+      // pass] mirrors smsParser.ts's new RD entry.
+      subCategories: ['Fixed Deposit', 'Recurring Deposit', 'FD Maturity'] },
     { category: 'Government Schemes', color: '#2F9E44',
-      subCategories: ['NPS', 'PPF/SSY'] },
+      // 'SCSS/NSC/KVP' — [ADD, this pass] mirrors smsParser.ts's new entry.
+      subCategories: ['NPS', 'PPF/SSY', 'SCSS/NSC/KVP'] },
     // [ADD] Real Estate / Vehicle — MANUAL-ONLY categories. smsParser.ts
     // has no rule that will ever auto-produce these (no bank SMS template
     // reliably signals "this was a property/vehicle purchase" vs. any

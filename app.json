@@ -24,8 +24,6 @@
       "package": "com.pileap.app",
       "permissions": [
         "android.permission.READ_SMS",
-        "android.permission.RECEIVE_SMS",
-        "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS"
       ]
     },
@@ -45,7 +43,9 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/66797a5f-4add-47f4-943f-fe6b5dd41061"
+      "url": "https://u.expo.dev/66797a5f-4add-47f4-943f-fe6b5dd41061",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
     }
   }
 }

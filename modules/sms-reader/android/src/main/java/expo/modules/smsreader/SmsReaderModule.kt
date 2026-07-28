@@ -92,6 +92,29 @@ import expo.modules.kotlin.exception.CodedException
 //     accounts.balance_latest update instead of pending_review once they
 //     reach it. This fix only ensures they aren't discarded before they
 //     get that far.
+//   - [FIX] "withdrawal" direction-signal check (step 8) is a bare
+//     substring match, which matched the plural "withdrawals" inside
+//     forward-looking POLICY text ("UPI cash withdrawals at ATMs will be
+//     part of monthly free ATM txn limits. Rs. 23+tax per txn will apply
+//     post free limit."), not just real withdrawal events — turning a fee-
+//     schedule announcement into a phantom transaction. Added a step 7
+//     exclusion scoped to the "w.e.f./effective from" + "will apply"
+//     policy-notice construction. Mirrors the identical fix in
+//     layer1sim.js.
+//   - [ADD] "confirm(ed) receipt of Rs" added as a direction signal (step
+//     8) — vendor/payee-side payment confirmations (e.g. insurer premium
+//     receipts: "We confirm receipt of Rs. 28658.18 towards ManipalCigna
+//     proposal no. : LIFETM050002204.") were being dropped as no_signal
+//     with no safety net if the matching bank-side debit SMS were ever
+//     missing. Layer 2's new PAYMENT_CONFIRMATION_NOTICE rule (ruleset.js)
+//     + transactions.ts reconciliation is what prevents this from double-
+//     counting alongside a real bank debit — mirrors the existing
+//     PROVISIONAL_CREDIT_NOTICE pattern (IRCTC refunds, vendor
+//     settlements) but for the debit side. Deliberately NOT added to the
+//     step 9 payee-acknowledgment drop-list: unlike those phrases, this
+//     one has no reconciliation safety net elsewhere if dropped, so it
+//     must survive to Layer 2 instead. Mirrors the identical fix in
+//     layer1sim.js.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SmsReaderModule : Module() {
@@ -439,6 +462,13 @@ class SmsReaderModule : Module() {
     //                            no bank debit SMS exists)
     //   payment_pending_nudge — Pre-payment link from merchant/insurer
     //                           (actual payment captured separately)
+    //   fee_policy_notice     — Forward-looking fee/limit schedule announcement
+    //                           (e.g. ATM withdrawal free-limit policy update).
+    //                           Not a transaction, but the "withdrawal"
+    //                           direction signal further below is a bare
+    //                           substring match that fires on the plural
+    //                           "withdrawals" in this exact construction —
+    //                           see the [FIX] note above passesFilter().
     if (b.contains("power cut") ||
         b.contains("power outage") ||
         b.contains("will be restored") ||
@@ -489,7 +519,20 @@ class SmsReaderModule : Module() {
          (b.contains("credited to your pf") || b.contains("credited to your epf") || b.contains("passbook"))) ||
         b.contains("epfo youtube") ||
         // payment_pending_nudge — payment link from merchant (payment already captured)
-        (b.contains("please complete the transaction") && b.contains("link is valid"))) {
+        (b.contains("please complete the transaction") && b.contains("link is valid")) ||
+        // [ADD] fee_policy_notice — forward-looking fee/limit schedule
+        // announcements. Confirmed real case: "Update: W.e.f 1st Apr '26,
+        // UPI cash withdrawals at ATMs will be part of monthly free ATM
+        // txn limits. Rs. 23+tax per txn will apply post free limit." was
+        // landing as a fake -₹23 debit — the bare "withdrawal" direction
+        // signal further below matches the substring "withdrawal" inside
+        // "withdrawals" here, even though this is a policy statement, not
+        // an actual withdrawal event. Scoped narrowly to the "w.e.f./
+        // effective from" + "will apply" construction so real "Cash
+        // withdrawal of Rs.X..." messages (which never use this future-
+        // tense policy phrasing) are unaffected. Mirrors layer1sim.js.
+        ((b.contains("w.e.f") || b.contains("effective from")) && b.contains("will apply")) ||
+        b.contains("free atm txn limit")) {
       return false
     }
 
@@ -622,7 +665,19 @@ class SmsReaderModule : Module() {
       // built (next step).
       b.contains("processed")        ||
       b.contains("settlement")       ||
-      b.contains("payout")
+      b.contains("payout")           ||
+      // [ADD] Vendor/payee-side payment confirmations — e.g. "We confirm
+      // receipt of Rs. 28658.18 towards ManipalCigna proposal no. :
+      // LIFETM050002204." Real gap: this exact template was falling
+      // through as no_signal and being permanently lost. Unlike the
+      // payee-acknowledgment phrases in step 9 below, this one has no
+      // companion check that drops it as redundant, so letting it through
+      // here is safe — Layer 2's PAYMENT_CONFIRMATION_NOTICE rule +
+      // transactions.ts reconciliation is what prevents it from double-
+      // counting alongside a matching real bank debit, mirroring the
+      // existing provisional-credit pattern (IRCTC refunds, vendor
+      // settlements) but for the debit side. Mirrors layer1sim.js.
+      Regex("""\bconfirm(?:ed)?\s+receipt\s+of\b""", RegexOption.IGNORE_CASE).containsMatchIn(b)
 
     if (!hasCurrencySignal || !hasDirectionSignal) return false
 

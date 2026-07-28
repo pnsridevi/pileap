@@ -109,8 +109,14 @@
  */
 
 import { supabase } from '../supabase';
-import type { ParsedTransaction, BalanceUpdate } from '../smsParser';
-import { isBalanceUpdate } from '../smsParser';
+import type { ParsedTransaction, BalanceUpdate, Classification } from '../smsParser';
+import { isBalanceUpdate, matchCustomCategory, matchRegisteredFact } from '../smsParser';
+// [ADD] Needed by reconcilePendingTransactions() below — same fetch
+// functions test-sms.tsx already uses to build a MatchContext at parse
+// time, reused here to re-check rows that were already inserted before a
+// given custom category / registered fact existed.
+import { fetchCustomCategories } from './customCategories';
+import { fetchActiveRegisteredFacts } from './registeredFacts';
 
 // [CHANGED] Real login is now in place (phone/OTP via Supabase Auth). Every
 // function that used to read the CURRENT_USER_ID constant now calls this
@@ -500,10 +506,17 @@ const DEFINITIONAL_CONTRA_RULES = new Set([
 // free-text field used for several non-"failure" states (e.g.
 // balance_disclosure_no_transaction), so this is consistent with existing
 // usage, not a new pattern. No schema change.
+// [FIX] Added PAYMENT_CONFIRMATION_NOTICE — this set (and this whole
+// reconciliation mechanism) now covers vendor-side DEBIT confirmations
+// too, not just credits. The name is kept as-is for continuity with the
+// existing schema convention (parse_failure = 'awaiting_bank_confirmation'
+// applies identically either direction), but see the amount!==0 guards
+// below (previously amount>0-only) for the actual direction-agnostic fix.
 const PROVISIONAL_CREDIT_RULES = new Set([
   'VENDOR_SETTLEMENT_NOTICE',
   'PROVISIONAL_CREDIT_NOTICE',
   'REFUND_INITIATED',
+  'PAYMENT_CONFIRMATION_NOTICE',
 ]);
 
 // How many days AFTER the provisional notice's own txn_date a later real
@@ -600,7 +613,60 @@ async function findExistingConfirmingCredit(
   return !!(data && data.length > 0);
 }
 
+// [CHANGED — this pass] No longer a hard skip. Originally added to stop
+// the same SMS being silently re-inserted (e.g. test-sms.tsx's sync button
+// tapped twice), keyed on (user_id, raw_text, txn_date) since raw_sms_id
+// was never persisted as a column. That protection is still needed — but
+// a hard skip on this key has a real failure mode: two genuinely different
+// real transactions can share byte-identical raw_text AND the same
+// txn_date (confirmed against real data — two separate ₹1000 NACH SIP
+// debits landing on the same day, with no time component in the SMS body
+// to tell them apart), and a hard skip silently drops the second one with
+// no row, no flag, nothing the user can see or correct.
+//
+// Now this signal feeds the SAME possible_duplicate_of/duplicate_confidence
+// pipeline findDuplicateCandidate() already uses below — the row still
+// gets inserted (never silently dropped, consistent with this file's
+// existing "every parsed message always produces exactly one row"
+// principle), just flagged and forced to pending_review so the user
+// decides via confirmDuplicate()/dismissDuplicate(), instead of the app
+// silently guessing either way.
+//
+// Scoped to is_deleted=false only — if an earlier row for this exact SMS
+// was soft-deleted (e.g. as a resolved duplicate or reconciled
+// placeholder), a fresh ingest of the same SMS should be allowed to
+// re-insert clean rather than being flagged against a row nobody can see
+// anymore.
+async function findExistingTransactionForSms(
+  userId: string,
+  rawText: string,
+  txnDate: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('raw_text', rawText)
+    .eq('txn_date', txnDate)
+    .eq('is_deleted', false)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? data.id : null;
+}
+
 async function insertTransaction(txn: ParsedTransaction, userId: string): Promise<{ id: string; skipPairing: boolean }> {
+  // [CHANGED — this pass] Still checked first, before any other work, but
+  // no longer returns early — see findExistingTransactionForSms()'s
+  // docblock above. Carried forward as exactTextMatchId and folded into
+  // the duplicateCandidate/duplicateConfidence computation further down,
+  // alongside findDuplicateCandidate()'s existing amount/date/merchant
+  // heuristic.
+  const exactTextMatchId = txn.raw_text
+    ? await findExistingTransactionForSms(userId, txn.raw_text, txn.txn_date)
+    : null;
+
   const accountId = txn.account_number_masked
     ? await resolveAccountId(txn.account_number_masked, txn.bank, txn.channel, userId)
     : await resolveUnknownAccountId(userId);
@@ -643,14 +709,21 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
 
   const isProvisionalCredit = !!(txn.matched_rule && PROVISIONAL_CREDIT_RULES.has(txn.matched_rule));
 
-  // [NEW] If this is a REAL (non-provisional) credit, check whether it
-  // confirms an earlier vendor promise/refund-initiated placeholder still
-  // awaiting confirmation, and if so, hide that placeholder now — "only
-  // the credit will appear," not both. Must run before findDuplicateCandidate
-  // below: once the placeholder is soft-deleted here, it's correctly
-  // excluded from that query's is_deleted=false filter, so the two checks
-  // can't collide with each other on the rare case they'd both match.
-  if (!isProvisionalCredit && txn.amount !== null && txn.amount > 0) {
+  // [NEW] If this is a REAL (non-provisional) transaction, check whether
+  // it confirms an earlier vendor promise/refund-initiated/payment-
+  // confirmation placeholder still awaiting confirmation, and if so, hide
+  // that placeholder now — "only the real transaction will appear," not
+  // both. Must run before findDuplicateCandidate below: once the
+  // placeholder is soft-deleted here, it's correctly excluded from that
+  // query's is_deleted=false filter, so the two checks can't collide with
+  // each other on the rare case they'd both match.
+  // [FIX] Was `txn.amount > 0` (credit-only) — reconcileProvisionalCredit()
+  // matches on exact signed amount equality, so it already worked
+  // correctly for negative (debit) amounts once called; the guard just
+  // never let a real debit call it. Broadened to amount!==0 now that
+  // PAYMENT_CONFIRMATION_NOTICE (a debit-side placeholder, negative
+  // amount) needs the same reconciliation a credit-side placeholder gets.
+  if (!isProvisionalCredit && txn.amount !== null && txn.amount !== 0) {
     await reconcileProvisionalCredit(userId, txn.txn_date, txn.amount);
   }
 
@@ -659,8 +732,11 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
   // database (see findExistingConfirmingCredit()'s comment for why —
   // processing order is not guaranteed chronological). If so, this
   // placeholder should be inserted already resolved.
+  // [FIX] Same amount>0 → amount!==0 broadening as above, for the same
+  // reason — a PAYMENT_CONFIRMATION_NOTICE placeholder has a negative
+  // (debit) amount and needs this check to actually run for it.
   const alreadyConfirmed =
-    (isProvisionalCredit && txn.amount !== null && txn.amount > 0)
+    (isProvisionalCredit && txn.amount !== null && txn.amount !== 0)
       ? await findExistingConfirmingCredit(userId, txn.txn_date, txn.amount)
       : false;
 
@@ -689,23 +765,33 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
   // table by the INSERT below.
   const isRecurringMandate = txn.channel === 'NACH' || txn.matched_rule === 'GENERIC_NACH';
 
-  // [NEW — this pass] Check for a possible duplicate BEFORE inserting, so
-  // possible_duplicate_of/duplicate_confidence can be set in the same
-  // INSERT rather than a follow-up UPDATE. Skipped for definitional-contra
-  // rows (a recurring credit-card bill payment at the same amount every
-  // month is EXPECTED to repeat — flagging those as "duplicates" would be
-  // noise), skipped for recurring-mandate rows (see isRecurringMandate
-  // above — same rationale, different reason), and skipped when amount is
-  // null (declined-transaction placeholders — nothing meaningful to match
-  // on).
-  const duplicateCandidate =
-    (!isDefinitionalContra && !isRecurringMandate && txn.amount !== null)
+  // [CHANGED — this pass] Two duplicate signals now feed the same
+  // possible_duplicate_of/duplicate_confidence pipeline:
+  //   1. exactTextMatchId (from findExistingTransactionForSms above) — an
+  //      identical raw_text + txn_date match. Takes priority when present,
+  //      and deliberately applies even for recurring-mandate rows (unlike
+  //      the heuristic check below) — a NACH SIP debit repeating on a
+  //      DIFFERENT day is expected and fine, but two occurrences with
+  //      byte-identical text on the SAME day is exactly the ambiguous case
+  //      that needs a human decision, not a silent guess either way.
+  //   2. findDuplicateCandidate() — the pre-existing amount+date+merchant
+  //      heuristic, unchanged, still skipped for definitional-contra and
+  //      recurring-mandate rows for the reasons already documented above.
+  const duplicateCandidate: DuplicateCandidate | null = exactTextMatchId
+    ? { id: exactTextMatchId, ref_number: null, merchant_key: null }
+    : (!isDefinitionalContra && !isRecurringMandate && txn.amount !== null)
       ? await findDuplicateCandidate(userId, accountId, txn.txn_date, txn.amount, txn.merchant_key)
       : null;
 
-  const duplicateConfidence = duplicateCandidate
-    ? computeDuplicateConfidence(txn.ref_number, duplicateCandidate.ref_number, txn.merchant_key, duplicateCandidate.merchant_key)
-    : null;
+  // [CHANGED — this pass] An identical raw_text + txn_date match is
+  // stronger evidence than even an exact ref_number match (0.95) — it's
+  // not just the same reference number, it's literally the same message
+  // text end-to-end — so it's scored just above that ceiling.
+  const duplicateConfidence = exactTextMatchId
+    ? 0.98
+    : duplicateCandidate
+      ? computeDuplicateConfidence(txn.ref_number, duplicateCandidate.ref_number, txn.merchant_key, duplicateCandidate.merchant_key)
+      : null;
 
   // Per arch doc Table 23: account_id must not be null; if the parser
   // couldn't extract a real account number, route to pending_review
@@ -745,6 +831,11 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
     source:                txn.source,
     status,
     raw_text:              txn.raw_text,
+    // [FIX] Was never written — resolvedFrom made it as far as the in-memory
+    // ParsedTransaction object and died there. See add_resolved_from.sql for
+    // the column this now writes into, and the Transaction interface change
+    // above for why the review queue UI can now actually read it back.
+    resolved_from:         txn.resolvedFrom ?? null,
     // [NEW] Was always hardcoded false. A provisional-credit placeholder
     // whose real confirming credit already exists (see
     // findExistingConfirmingCredit() above) now inserts pre-resolved —
@@ -1099,8 +1190,19 @@ export async function ingestParsedMessages(
 // ─── Fetch for the Transactions tab ───────────────────────────────────────────
 
 export interface TransactionFilters {
-  status?:  'approved' | 'pending_review' | 'user_reviewed';
-  statuses?: ('approved' | 'pending_review' | 'user_reviewed')[];
+  // [FIX] Added 'haiku_suggested' — a real, live status value in the DB
+  // CHECK constraint (transactions_status_check) that was absent from
+  // every TypeScript type in this file. Concretely: fetchTransactions()'s
+  // caller (Transactions tab) only ever requested
+  // statuses: ['pending_review', 'approved'] — a row the backend Haiku
+  // worker (layer3_haiku.js — still unopened, per the original
+  // carry-forward notes) sets to 'haiku_suggested' would match NONE of the
+  // app's queries: not the active feed, not history (user_reviewed only).
+  // It would be permanently invisible with no error anywhere. This fix
+  // only restores the type — see fetchTransactions()/fetchNeedsReviewCount()
+  // below and index.tsx for the query-level fix that actually includes it.
+  status?:  'approved' | 'pending_review' | 'user_reviewed' | 'haiku_suggested';
+  statuses?: ('approved' | 'pending_review' | 'user_reviewed' | 'haiku_suggested')[];
   category?: string;
   page?:     number;
   pageSize?: number;
@@ -1180,9 +1282,15 @@ export interface Transaction {
   merchant: string | null;
   merchant_key: string | null;
   source: 'sms' | 'email' | 'manual' | 'pdf' | 'cash' | 'haiku';
-  status: 'pending_review' | 'approved' | 'user_reviewed';
+  status: 'pending_review' | 'approved' | 'user_reviewed' | 'haiku_suggested';
   reviewed_at: string | null;
   raw_text: string | null;
+  // [ADD] Was computed at parse time (smsParser.ts's Classification.
+  // resolvedFrom) but never persisted — insertTransaction() never wrote it
+  // and this table had no column for it. See add_resolved_from.sql. Needed
+  // so the review queue UI can show "matched from your saved preference"
+  // vs "matched from a registered recurring payment" instead of nothing.
+  resolved_from: 'custom_category' | 'registered_fact' | null;
   is_deleted: boolean;
   split_from_id: string | null;
   added_late: boolean;
@@ -1197,6 +1305,15 @@ export interface Transaction {
   txn_group_id: string | null;
   is_infrastructure: boolean;
   created_at: string;
+  // [FIX] Was missing from this interface despite being a real column,
+  // actively queried elsewhere in this file (.eq('parse_failure',
+  // 'awaiting_bank_confirmation'), .is('parse_failure', null)) and written
+  // on insert. select('*') was already returning it at runtime; it just
+  // wasn't typed, so nothing could read it safely. Free-text field used for
+  // several distinct "flagged, needs special handling" states — see the
+  // header comment above confirmProvisionalCredit's usage — not only
+  // parse failures despite the name.
+  parse_failure: string | null;
 }
 
 export async function fetchTransactionById(id: string): Promise<Transaction | null> {
@@ -1227,7 +1344,11 @@ export async function fetchNeedsReviewCount(): Promise<number> {
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .eq('is_deleted', false)
-    .eq('status', 'pending_review')
+    // [FIX] Was .eq('status', 'pending_review') only — haiku_suggested rows
+    // need the user's attention just as much (a Haiku-suggested guess is
+    // exactly the kind of thing that should show up in "N need review"),
+    // and were silently excluded from the count entirely.
+    .in('status', ['pending_review', 'haiku_suggested'])
     // [ADD] Same exclusion as fetchTransactions above, same reason: a
     // declined-transaction placeholder has no amount/category/merchant to
     // correct, so it shouldn't inflate "N need review" with something the
@@ -1408,4 +1529,108 @@ export async function submitTransactionPage(payload: SubmitPagePayload): Promise
   }
 
   return { newSplitChildIds };
+}
+
+// ─── Reconciliation against custom_categories / registered_facts ────────────
+//
+// [ADD] matchCustomCategory()/matchRegisteredFact() in smsParser.ts only
+// ever run at PARSE time — the moment a new SMS is first turned into a
+// transaction row (see classify() there). A custom category confirmed via
+// EditModal, or a registered fact confirmed via RegisterFactPrompt, AFTER
+// an older transaction was already inserted never gets applied back onto
+// that older row — nothing previously re-checked existing uncategorized
+// rows against facts/categories added later. This closes that gap.
+//
+// [FIX — this pass] Originally scoped to status IN ('pending_review',
+// 'haiku_suggested'), on the assumption that "uncategorized" and "pending
+// review" were the same thing. Confirmed false against real data —
+// classify()'s own fallback can land a genuinely uncategorized row as
+// status:'approved' with category:null directly. Scoped to category IS
+// NULL now instead — see the query below for the full reasoning.
+//
+// Deliberately reuses smsParser.ts's own matchers rather than
+// re-implementing comparison logic here — single source of truth for
+// "what counts as a match," same reasoning normaliseMerchantKey() being
+// shared (not duplicated) already follows in this codebase.
+//
+// Call this whenever you want a fresh reconciliation pass — e.g. once per
+// app open/mount on the Transactions tab (see index.tsx). Safe to call
+// repeatedly: rows that don't match anything are simply left untouched.
+export interface ReconcileResult {
+  checked:  number;
+  resolved: number;
+}
+
+export async function reconcilePendingTransactions(): Promise<ReconcileResult> {
+  const userId = await getCurrentUserId();
+
+  // [FIX — this pass] Was `.in('status', ['pending_review', 'haiku_suggested'])`
+  // — a wrong assumption that "needs classification" and "is pending_review"
+  // are the same thing. Confirmed false against real data: classify()'s own
+  // fallback path can land a genuinely uncategorized debit as
+  // status:'approved', category:null directly (e.g. a P2P transfer to a
+  // person's name with no matching TAXONOMY rule) — that row was invisible
+  // to this query even though it's exactly the case reconciliation exists
+  // to catch. Select on the actual signal instead: category IS NULL, i.e.
+  // "never got classified," regardless of what status it happened to land
+  // on. Excludes possible_duplicate_of rows — those need an explicit
+  // confirm/dismiss from the user regardless of category, and this pass
+  // forcing status:'approved' below would wrongly clear that independent
+  // review requirement. Excludes user_reviewed — a human already looked at
+  // that row; not this pass's place to second-guess it.
+  const [{ data: pendingRows, error: fetchError }, customCategories, registeredFacts] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('id, amount, merchant, ref_number')
+      .eq('user_id', userId)
+      .eq('is_deleted', false)
+      .neq('status', 'user_reviewed')
+      .is('category', null)
+      .is('possible_duplicate_of', null),
+    fetchCustomCategories(),
+    fetchActiveRegisteredFacts(),
+  ]);
+
+  if (fetchError) throw fetchError;
+
+  type PendingRow = { id: string; amount: number | null; merchant: string | null; ref_number: string | null };
+  const rows = (pendingRows ?? []) as PendingRow[];
+  if (rows.length === 0) return { checked: 0, resolved: 0 };
+
+  let resolved = 0;
+
+  for (const row of rows) {
+    // custom_categories applies to any merchant, credit or debit.
+    const customMatch = matchCustomCategory(row.merchant, customCategories);
+
+    // registered_facts only ever applies to debits — mirrors the
+    // `!isCredit` gate classify() already uses at parse time, so this
+    // reconciliation pass can't resolve a credit row via a registered fact
+    // in a way parse-time matching never would have.
+    const isCredit = row.amount != null && row.amount >= 0;
+    const factMatch: Classification | null =
+      !isCredit && row.amount != null
+        ? matchRegisteredFact(Math.abs(row.amount), row.merchant, row.ref_number, registeredFacts)
+        : null;
+
+    const match = customMatch ?? factMatch;
+    if (!match) continue;
+
+    const { error: updateError } = await supabase
+      .from('transactions')
+      .update({
+        type:          match.type,
+        category:      match.category,
+        sub_category:  match.sub_category,
+        status:        'approved',
+        parse_failure: null,
+        resolved_from: match.resolvedFrom ?? null,
+      })
+      .eq('id', row.id);
+
+    if (updateError) throw updateError;
+    resolved++;
+  }
+
+  return { checked: rows.length, resolved };
 }

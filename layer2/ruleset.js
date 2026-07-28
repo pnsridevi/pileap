@@ -195,6 +195,30 @@ function extractChannel(body) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function extractAmount(body) {
+  // [FIX — found via corpus test, most severe bug found across this whole
+  // review] Indian-notation word multipliers ("Rs.50 Lakhs", "Rs.1.2
+  // Crore", "An amount of Rs 1.5 Lakh has been debited...") were being
+  // parsed as literally 50, 1.2, and 1.5 — the plain Rs/INR/₹ patterns
+  // below capture only the leading digits and have no idea the following
+  // word scales that number by 100,000x (Lakh) or 10,000,000x (Crore).
+  // This is not a rare formatting quirk — real Indian bank SMS routinely
+  // word large transfers this way (RTGS, big salary credits, six/seven-
+  // figure NEFT). The bug was catastrophic, not just wrong: a ₹1.5 lakh
+  // (₹150,000) RTGS debit was recorded as ₹1.50, silently slipping under
+  // every review/approval threshold in the app and auto-approving as if
+  // it were a trivial transaction — the opposite of "fails safe."
+  // This check MUST run before the plain Rs/INR/₹ patterns below, since
+  // those would otherwise match first on the leading digits and return
+  // before ever seeing the Lakh/Crore word that follows.
+  const lakhCrore = body.match(/(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)\s*(lakhs?|crores?)\b/i);
+  if (lakhCrore) {
+    const raw = parseFloat(lakhCrore[1].replace(/,/g, ''));
+    if (raw > 0) {
+      const multiplier = /crore/i.test(lakhCrore[2]) ? 10000000 : 100000;
+      return raw * multiplier;
+    }
+  }
+
   const inr = body.match(/INR\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (inr) { const v = parseFloat(inr[1].replace(/,/g, '')); if (v > 0) return v; }
 
@@ -442,6 +466,37 @@ function extractRefNumber(body) {
   if (m) return { ref_number: m[1], ref_type: 'neft_utr' };
 
   return { ref_number: null, ref_type: null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GENERIC REFERENCE-VALUE CAPTURE — for registered_facts matching only
+//
+// Deliberately separate from extractRefNumber() above. That function feeds
+// ref_number/ref_type on the transactions table, which contra-detection and
+// duplicate-detection already depend on — must not change.
+//
+// This one exists for a different purpose: registered_facts (Table X) needs
+// SOME exact, stable identifier when a NACH/mandate debit's merchant field
+// is unusable (e.g. "INDIAN CLEARING CORP LTD" instead of the real lender).
+// Real SMS carry this identifier under many different labels depending on
+// the entity — UMRN (bank NACH), Mandate ID (card AutoPay), Policy No.
+// (insurance), Folio No. (mutual funds) — and there will always be more
+// labels we haven't seen yet. Rather than adding a new named field per
+// label (unbounded growth, the exact trap flagged in conversation — "we
+// don't know what each entity will have"), this captures ANY of them into
+// one generic value. The label itself is discarded; only the code that
+// follows it is kept. registered_facts.reference_value doesn't care what
+// it was called, only that it's a stable, reusable identifier.
+//
+// Add a new label to this alternation as real data surfaces one — same
+// low-effort pattern already used for bank tokens and merchant names in
+// this file, not a new subsystem each time.
+const REFERENCE_LABELS =
+  /\b(?:UMRN|Mandate\s*ID|Policy\s*No\.?|Folio\s*No\.?|Loan\s*A\/c\.?|Mandate\s*Ref(?:erence)?)\s*[:\s]\s*([A-Za-z0-9]{4,25})\b/i;
+
+function extractReferenceValue(body) {
+  const m = body.match(REFERENCE_LABELS);
+  return m ? m[1] : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -798,7 +853,15 @@ const RULES = [
     // payment" within ~30 chars after) so this generalizes to the concept
     // — an amount described near "credit card" + "bill payment" — instead
     // of matching only the exact sentences already seen.
-    pattern: /(?:for:\s*credit card payment|paid towards.*credit card|payment towards.*credit card|paid.*for.*credit card|received\s+towards.*credit\s+card|payment\s+of\s+.*received\s+towards.*credit\s+card|(?:credited|received|paid).{0,40}credit\s*card.{0,30}bill\s*payment)/im,
+    // [FIX] Added "credited to your card ending" — a third real HDFC
+    // template for this exact same event ("HDFC Bank Cardmember, Payment
+    // of Rs 18751 was credited to your card ending 4636 on 14/MAY/2026.")
+    // matched none of the alternatives above (no "towards", no "bill
+    // payment") and fell through to GENERIC_CREDIT, which recorded a real
+    // credit-card bill payment as +₹X income. Confirmed live in production
+    // data. Scoped to "card ending" (not bare "credited to your card") so
+    // this doesn't accidentally swallow an unrelated real credit message.
+    pattern: /(?:for:\s*credit card payment|paid towards.*credit card|payment towards.*credit card|paid.*for.*credit card|received\s+towards.*credit\s+card|payment\s+of\s+.*received\s+towards.*credit\s+card|credited\s+to\s+your\s+card\s+ending|(?:credited|received|paid).{0,40}credit\s*card.{0,30}bill\s*payment)/im,
     extract(body, messageDate) {
       // Amount: from "Paid Rs. X" or "Payment of Rs. X ... received"
       const amtMatch = body.match(/(?:[Pp]aid|[Pp]ayment\s+of)\s+(?:Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i);
@@ -1626,6 +1689,72 @@ const RULES = [
     },
   },
 
+  // ── 10d. PAYMENT CONFIRMATION NOTICE (vendor-side "confirm receipt") ───────
+  // [ADD] Companion to PROVISIONAL_CREDIT_NOTICE/VENDOR_SETTLEMENT_NOTICE
+  // above, but for the DEBIT side: a vendor/payee acknowledging money it
+  // received FROM the user, using phrasing none of isPayeeAck's existing
+  // drop-list covers. Real gap: "Dear Customer, We confirm receipt of Rs.
+  // 28658.18 towards ManipalCigna proposal no. : LIFETM050002204. We will
+  // update you shortly on policy issuance status." matched no rule at all
+  // and was silently dropped at Layer 1 as no_signal (see the matching
+  // Layer 1 fix in layer1sim.js). In the one real case checked, a matching
+  // bank-side debit SMS also existed the same day, so nothing was
+  // ultimately lost — but that was incidental, not guaranteed: unlike
+  // IRCTC/IRCTC-style refunds, this class of message previously had NO
+  // safety net at all if the bank-side SMS were ever missing or
+  // unparseable. This rule + the amount!==0 broadening in
+  // transactions.ts's reconcileProvisionalCredit()/findExistingConfirmingCredit()
+  // calls gives it the same protection.
+  //
+  // Same exclusion structure as VENDOR_SETTLEMENT_NOTICE — explicitly
+  // excludes every bank-side verb so this can never shadow GENERIC_DEBIT/
+  // GENERIC_CREDIT or any more specific rule above. Generic by
+  // construction: no vendor name hardcoded, matches purely on "confirm(ed)
+  // receipt of Rs.X" structure.
+  //
+  // Deliberately low, fixed confidence (0.5), same as its credit-side
+  // counterparts — account_number_masked is always null here (vendors
+  // don't cite the receiving bank account), which already forces
+  // status:'pending_review' via smsParser.ts's existing needsReview logic.
+  {
+    id: 'PAYMENT_CONFIRMATION_NOTICE',
+    pattern: {
+      test(body) {
+        // Defensive exclusion, same pattern as VENDOR_SETTLEMENT_NOTICE
+        // above — if a bank-side verb is present, a more specific/
+        // authoritative rule should handle this message instead, so this
+        // rule steps aside. "Confirm receipt of" itself contains none of
+        // these verbs, so a genuine match is unaffected by this guard.
+        if (/\b(?:credited|deposited|received|refunded|reversed|debited|deducted|withdrawn|spent|sent)\b/i.test(body)) {
+          return false;
+        }
+        return /\bconfirm(?:ed)?\s+receipt\s+of\s+(?:Rs\.?|INR|₹)/i.test(body);
+      },
+    },
+    extract(body, messageDate) {
+      // Trailing "-VendorName" signature — same generic extractor used by
+      // VENDOR_SETTLEMENT_NOTICE/PROVISIONAL_CREDIT_NOTICE. Falls back to
+      // "towards X" phrasing, then null, if neither is present.
+      const vendorMatch = body.trim().match(/-\s*([A-Za-z][A-Za-z .&]{2,30})\s*$/);
+      const towardsMatch = body.match(/towards\s+([A-Za-z][A-Za-z0-9 .&]{2,40}?)(?:\s+proposal|\s+policy|,|\.|$)/i);
+      const merchant = vendorMatch ? vendorMatch[1].trim() : (towardsMatch ? towardsMatch[1].trim() : null);
+      return {
+        direction:             'debit',
+        amount:                extractAmount(body),
+        bank:                  extractBank(body),
+        channel:               'Payment Confirmation',
+        account_number_masked: extractAccount(body),
+        txn_date:              extractDate(body) || messageDate,
+        merchant,
+        balance:               null,
+        ref_number:            null,
+        ref_type:              null,
+        possible_contra:       false,
+        confidence:            0.5,
+      };
+    },
+  },
+
   // ── 11. GENERIC DEBIT ──────────────────────────────────────────────────────
   {
     id: 'GENERIC_DEBIT',
@@ -1750,6 +1879,10 @@ function matchMessage(body, messageDate) {
         balance:                 fields.balance   ?? null,
         ref_number:              fields.ref_number || null,
         ref_type:                fields.ref_type   || null,
+        // [ADD] For registered_facts matching only — see extractReferenceValue()
+        // above. Computed directly from body, not per-rule, since it's a
+        // structural signal independent of which extraction rule matched.
+        reference_value:         extractReferenceValue(body),
         confidence:              fields.confidence,
         possible_contra:         fields.possible_contra         || false,
         requires_classification: fields.requires_classification || false,
@@ -1779,6 +1912,7 @@ module.exports = {
   extractBenefitCardMerchant,
   extractBenefitCardChannel,
   extractRefNumber,
+  extractReferenceValue,
   extractBalance,
   classifyVpa,
   isPossibleSelfTransfer,

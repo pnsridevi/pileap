@@ -1,55 +1,91 @@
 /**
  * app/(app)/transactions/index.tsx
  *
- * Main Transactions tab (the "Feed" sub-tab per arch doc 10.3.2). Was empty.
+ * Main Transactions tab (the "Feed" sub-tab per arch doc 10.3.2).
  *
- * Data flow:
- *   - fetchTransactions({ statuses: ['pending_review','approved'], ... })
- *     for the Active feed — History (user_reviewed) is a separate screen,
- *     not built in this pass (not listed in the file inventory you gave me).
+ * [CHANGED — migration pass] Previously kept all state local (useState)
+ * rather than reaching into src/store/transactionStore.ts + the sibling
+ * src/hooks/useTransactionFeed.ts, since those files weren't in this
+ * screen's original code path and their existing shape was unknown. Now
+ * that useTransactionFeed's History branch is about to get a real second
+ * screen, this migrates onto the shared store/hook rather than leaving two
+ * divergent "fetch and paginate transactions" implementations in the repo —
+ * one filter vocabulary, one pagination model, shared between Active and
+ * History. See useTransactionFeed.ts's docblock for the two real bugs that
+ * migration would have reintroduced (haiku_suggested invisibility, and the
+ * hook's own lossy display-mapping breaking the edit/split flow) and how
+ * they were fixed there before this file touched it.
+ *
+ * What stays local, deliberately:
+ *   - needsReviewCount / hasAny: screen-level counts, not feed/pagination
+ *     state, and not filtered by category or status the way the feed is —
+ *     no reason for the hook to own them.
+ *   - draftEdits / draftSplits / editingTxn / splittingTxn: page-scoped
+ *     ephemeral UI state (arch doc 5.3.3 — nothing written until Submit).
+ *     transactionStore holds filter selections shared across screens;
+ *     an unsaved draft is not that, so it stays local here.
+ *
+ * Data flow (unchanged):
  *   - EditModal / SplitFlow only produce draft objects held in local state
- *     (draftEdits, draftSplits) — arch doc 5.3.3, nothing written until
- *     Submit.
+ *     — arch doc 5.3.3, nothing written until Submit.
  *   - Submit calls transactions.ts:submitTransactionPage(), which requires
  *     the submit_transaction_page RPC migration to be applied first (see
  *     supabase/migrations/submit_transaction_page.sql).
- *
- * State management: kept local (useState) rather than reaching into
- * src/store/transactionStore.ts, since I don't know that store's existing
- * shape and didn't want to guess-overwrite it. If it's meant to own this
- * screen's state, that's a follow-up wiring task.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { useRouter } from 'expo-router';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import { TransactionRow, mapTransactionToRow } from '@/components/transactions/TransactionRow';
 import { EditModal } from '@/components/transactions/EditModal';
 import { SplitFlow } from '@/components/transactions/SplitFlow';
+import { RegisterFactPrompt } from '@/components/transactions/RegisterFactPrompt';
 import { Button } from '@/components/ui/Button';
+import { useTransactionFeed } from '@/hooks/useTransactionFeed';
+import { useTransactionStore } from '@/store/transactionStore';
 import {
-  fetchTransactions,
   fetchNeedsReviewCount,
   hasAnyTransactions,
   submitTransactionPage,
+  reconcilePendingTransactions,
   type Transaction,
   type TransactionEdit,
   type TransactionSplit,
 } from '@/lib/api/transactions';
 import { TAXONOMY, TxnType } from '@/constants/transactionTaxonomy';
-
-const PAGE_SIZE = 20;
-type StatusFilter = 'all' | 'review';
+import { saveCustomCategory } from '@/lib/api/customCategories';
 
 export default function TransactionsFeedScreen() {
-  const [rows, setRows] = useState<Transaction[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
+  const router = useRouter();
+
+  const {
+    transactions: rows,   // raw Transaction[] for the current page — see useTransactionFeed.ts docblock
+    totalCount,
+    loading,
+    refreshing: feedRefreshing,
+    page,
+    totalPages,
+    goToNextPage,
+    goToPreviousPage,
+    refresh: refreshFeed,
+  } = useTransactionFeed('active');
+
+  const {
+    statusFilter, categoryFilter,
+    setStatusFilter, setCategoryFilter,
+  } = useTransactionStore();
+  // [REMOVED] Used to pin the shared transactionStore's activeTab to
+  // 'active' here on mount. That shared value caused a real bug — see
+  // useTransactionFeed.ts's docblock — since History pinning it to
+  // 'history' on ITS mount silently redirected this still-mounted
+  // screen's own hook to History's filters too. useTransactionFeed now
+  // takes 'active' as a direct argument above instead, so this screen no
+  // longer depends on that shared flag at all.
+
+
   const [needsReviewCount, setNeedsReviewCount] = useState(0);
   const [hasAny, setHasAny] = useState<boolean | null>(null); // null = not yet known
-  const [page, setPage] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Draft workspace — nothing here is written to Supabase until Submit.
@@ -58,41 +94,65 @@ export default function TransactionsFeedScreen() {
 
   const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
   const [splittingTxn, setSplittingTxn] = useState<Transaction | null>(null);
+  const [registeringTxn, setRegisteringTxn] = useState<Transaction | null>(null);
 
   const allCategories = useMemo(
     () => Object.values(TAXONOMY).flat().map((c) => c.category),
     [],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [feed, reviewCount, any] = await Promise.all([
-        fetchTransactions({
-          statuses: ['pending_review', 'approved'],
-          category: categoryFilter === 'all' ? undefined : categoryFilter,
-          page,
-          pageSize: PAGE_SIZE,
-        }),
-        fetchNeedsReviewCount(),
-        hasAnyTransactions(),
-      ]);
-      const filtered = statusFilter === 'review'
-        ? feed.transactions.filter((t) => t.status === 'pending_review')
-        : feed.transactions;
-      setRows(filtered);
-      setTotalCount(feed.totalCount);
-      setNeedsReviewCount(reviewCount);
-      setHasAny(any);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [page, statusFilter, categoryFilter]);
+  const loadCounts = useCallback(async () => {
+    const [reviewCount, any] = await Promise.all([fetchNeedsReviewCount(), hasAnyTransactions()]);
+    setNeedsReviewCount(reviewCount);
+    setHasAny(any);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadCounts(); }, [loadCounts]);
 
-  const onRefresh = () => { setRefreshing(true); load(); };
+  // [ADD] Runs once per mount — i.e. every time this screen loads, including
+  // app reopen — to catch up any transaction that was left pending_review
+  // BEFORE a custom category or registered fact that would resolve it was
+  // confirmed. See transactions.ts's reconcilePendingTransactions() for why
+  // this doesn't happen anywhere else (matching only ever runs at SMS parse
+  // time otherwise). Doesn't block the initial render — runs alongside it —
+  // and only triggers a refetch if it actually resolved something, so a
+  // clean pass costs one extra read, not an extra render cycle.
+  useEffect(() => {
+    reconcilePendingTransactions()
+      .then(({ resolved }) => {
+        if (resolved > 0) {
+          refreshFeed();
+          loadCounts();
+        }
+      })
+      .catch((e) => console.error('reconcilePendingTransactions failed:', e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onRefresh = async () => {
+    setPullRefreshing(true);
+    // Matches original: refetches the CURRENT page (not page 0) — see
+    // useTransactionFeed.ts's refresh() docblock for why that's deliberate.
+    await Promise.all([refreshFeed(), loadCounts()]);
+    setPullRefreshing(false);
+  };
+
+  // [FIX] Original called local load() here, which refetched the page AND
+  // needsReviewCount/hasAny together. A first pass at this migration only
+  // refreshed the feed — but resolving a contra pair changes a row's
+  // status (e.g. clears pending_review), which can move needsReviewCount.
+  // Dropping the counts refresh here would have been a real regression.
+  const handleContraResolved = useCallback(async () => {
+    await Promise.all([refreshFeed(), loadCounts()]);
+  }, [refreshFeed, loadCounts]);
+
+  // [ADD] confirmRegisteredFact() resolves the triggering row out of
+  // pending_review (same category of change as contra resolution above),
+  // so this needs the same counts+feed refresh, not just the feed alone.
+  const handleFactConfirmed = useCallback(async () => {
+    setRegisteringTxn(null);
+    await Promise.all([refreshFeed(), loadCounts()]);
+  }, [refreshFeed, loadCounts]);
 
   // Rows as actually rendered: edited rows show their draft values inline,
   // and a split original is replaced by its (not-yet-real) draft children.
@@ -130,14 +190,24 @@ export default function TransactionsFeedScreen() {
     return out;
   }, [rows, draftEdits, draftSplits]);
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const hasDraftChanges = Object.keys(draftEdits).length > 0 || Object.keys(draftSplits).length > 0;
 
-  const handleSaveEdit = (edit: TransactionEdit, _saveCustomCategory: boolean) => {
+  const handleSaveEdit = async (edit: TransactionEdit, shouldSaveCustomCategory: boolean) => {
     setDraftEdits((prev) => ({ ...prev, [edit.id]: edit }));
     setEditingTxn(null);
-    // _saveCustomCategory intentionally unused past this point — see
-    // EditModal.tsx docblock / transactions.ts KNOWN GAPS #8.
+
+    if (shouldSaveCustomCategory && edit.merchant && edit.type && edit.category) {
+      try {
+        await saveCustomCategory({
+          merchant: edit.merchant,
+          type: edit.type,
+          category: edit.category,
+          subCategory: edit.sub_category ?? null,
+        });
+      } catch (e) {
+        console.error('Failed to save custom category preference:', e);
+      }
+    }
   };
 
   const handleSubmitSplit = (split: TransactionSplit) => {
@@ -156,7 +226,7 @@ export default function TransactionsFeedScreen() {
       });
       setDraftEdits({});
       setDraftSplits({});
-      await load();
+      await Promise.all([refreshFeed(), loadCounts()]);
     } finally {
       setSubmitting(false);
     }
@@ -165,6 +235,7 @@ export default function TransactionsFeedScreen() {
   if (hasAny === false) {
     return (
       <View style={styles.container}>
+        <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
         <EmptyState
           title="No transactions yet"
           subtitle="Connect a data source or upload past bank statements to see your transactions here."
@@ -176,9 +247,12 @@ export default function TransactionsFeedScreen() {
   if (hasAny === true && !loading && totalCount === 0 && needsReviewCount === 0 && rows.length === 0) {
     return (
       <View style={styles.container}>
+        <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
         <EmptyState
           title="All transactions reviewed"
           subtitle="Every transaction has been confirmed. View your Transaction History to see past activity."
+          actionLabel="View Transaction History →"
+          onAction={() => router.push('/(app)/transactions/history')}
         />
       </View>
     );
@@ -186,6 +260,8 @@ export default function TransactionsFeedScreen() {
 
   return (
     <View style={styles.container}>
+      <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+
       <View style={styles.headerRow}>
         <Text style={styles.headerCount}>
           {totalCount} transactions this month · <Text style={styles.headerCountStrong}>{needsReviewCount} need review</Text>
@@ -193,9 +269,9 @@ export default function TransactionsFeedScreen() {
       </View>
 
       <View style={styles.filterRow}>
-        <FilterChip label="All" active={statusFilter === 'all'} onPress={() => { setStatusFilter('all'); setPage(0); }} />
-        <FilterChip label="Needs review" active={statusFilter === 'review'} onPress={() => { setStatusFilter('review'); setPage(0); }} />
-        <FilterChip label="All categories" active={categoryFilter === 'all'} onPress={() => { setCategoryFilter('all'); setPage(0); }} />
+        <FilterChip label="All" active={statusFilter === 'all'} onPress={() => setStatusFilter('all')} />
+        <FilterChip label="Needs review" active={statusFilter === 'pending_review'} onPress={() => setStatusFilter('pending_review')} />
+        <FilterChip label="All categories" active={categoryFilter === null} onPress={() => setCategoryFilter(null)} />
       </View>
 
       <View style={styles.banner}>
@@ -208,7 +284,7 @@ export default function TransactionsFeedScreen() {
       <FlatList
         data={displayRows}
         keyExtractor={(item) => item.txn.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={pullRefreshing || feedRefreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{ paddingBottom: spacing.xl }}
         ListEmptyComponent={
           loading ? (
@@ -223,7 +299,8 @@ export default function TransactionsFeedScreen() {
             isEdited={item.isEdited}
             onPress={item.isDraftSplitChild ? undefined : () => setEditingTxn(item.txn)}
             onSplitPress={item.isDraftSplitChild ? undefined : () => setSplittingTxn(item.txn)}
-            onContraResolved={item.isDraftSplitChild ? undefined : load}
+            onContraResolved={item.isDraftSplitChild ? undefined : handleContraResolved}
+            onRegisterFactPress={item.isDraftSplitChild ? undefined : () => setRegisteringTxn(item.txn)}
           />
         )}
       />
@@ -236,14 +313,14 @@ export default function TransactionsFeedScreen() {
             variant="ghost"
             size="sm"
             disabled={page <= 0}
-            onPress={() => setPage((p) => Math.max(0, p - 1))}
+            onPress={goToPreviousPage}
           />
           <Button
             label="Next →"
             variant="ghost"
             size="sm"
             disabled={page >= totalPages - 1}
-            onPress={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            onPress={goToNextPage}
           />
           <Button
             label="Submit Changes"
@@ -268,6 +345,35 @@ export default function TransactionsFeedScreen() {
         onCancel={() => setSplittingTxn(null)}
         onSubmit={handleSubmitSplit}
       />
+      <RegisterFactPrompt
+        visible={!!registeringTxn}
+        transaction={registeringTxn}
+        onCancel={() => setRegisteringTxn(null)}
+        onConfirmed={handleFactConfirmed}
+      />
+    </View>
+  );
+}
+
+// Segmented Feed/History control — visually two tabs, but sits inside the
+// Stack (not a second native Tabs bar) so it doesn't stack a second bottom
+// tab bar under the app-level one in app/(app)/_layout.tsx. 'feed' here
+// maps to this screen (app/(app)/transactions/index.tsx); 'history' maps
+// to app/(app)/transactions/history.tsx, which renders the mirror-image
+// version of this same control via its own local copy.
+function SubTabs({ active, onSwitch }: { active: 'feed' | 'history'; onSwitch: () => void }) {
+  return (
+    <View style={styles.subTabRow}>
+      <View style={[styles.subTab, active === 'feed' && styles.subTabActive]}>
+        <Text style={[styles.subTabText, active === 'feed' && styles.subTabTextActive]}>Feed</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.subTab, active === 'history' && styles.subTabActive]}
+        activeOpacity={0.7}
+        onPress={onSwitch}
+      >
+        <Text style={[styles.subTabText, active === 'history' && styles.subTabTextActive]}>History</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -280,11 +386,23 @@ function FilterChip({ label, active, onPress }: { label: string; active: boolean
   );
 }
 
-function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
+function EmptyState({
+  title, subtitle, actionLabel, onAction,
+}: {
+  title: string;
+  subtitle: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <View style={styles.emptyState}>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySubtitle}>{subtitle}</Text>
+      {actionLabel && onAction && (
+        <TouchableOpacity onPress={onAction} activeOpacity={0.7} style={styles.emptyActionBtn}>
+          <Text style={styles.emptyActionText}>{actionLabel}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -305,6 +423,29 @@ const chipStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
+  subTabRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 3,
+    marginBottom: spacing.sm,
+  },
+  subTab: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+  },
+  subTabActive: {
+    backgroundColor: colors.white,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  subTabText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.muted },
+  subTabTextActive: { color: colors.dark },
   headerRow: { marginBottom: spacing.sm },
   headerCount: { fontSize: fontSize.sm, color: colors.muted },
   headerCountStrong: { color: colors.dark, fontWeight: fontWeight.semibold },
@@ -334,4 +475,6 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.dark, marginBottom: spacing.xs },
   emptySubtitle: { fontSize: fontSize.sm, color: colors.muted, textAlign: 'center', maxWidth: 320, lineHeight: 20 },
+  emptyActionBtn: { marginTop: spacing.md },
+  emptyActionText: { fontSize: fontSize.sm, color: colors.brand, fontWeight: fontWeight.semibold },
 });

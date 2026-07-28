@@ -6,6 +6,20 @@
  * parent, which holds it in local state (replacing the original row with
  * the drafted child rows in the page view) until page Submit.
  *
+ * [CONFIRMED] The actual submit_transaction_page Postgres function has now
+ * been reviewed against this flow — the shape this component builds
+ * ({ originalId, lines: [{ amount, type, category, sub_category,
+ * merchant }] }) matches exactly what the RPC reads off p_splits. It soft-
+ * deletes the original row and inserts one new row per line, each landing
+ * directly as status 'user_reviewed' (a split is treated as an immediate,
+ * final resolution, not something left pending). One thing this component
+ * has no visibility into and can't control: the RPC does not carry
+ * resolved_from or merchant_key forward onto the new split-child rows —
+ * both come back null, which is correct for resolved_from (a manually
+ * split line isn't an auto-resolved one) but means these rows won't be
+ * matchable by merchant_key if that's ever needed later. Flagging, not
+ * fixing — that's a call for whoever owns the RPC, not this file.
+ *
  * Uses ui/Button and ui/Input for text fields and footer actions. Type/
  * category/sub-category stay as custom chips — same reasoning as
  * EditModal.tsx.
@@ -38,7 +52,13 @@ function makeDefaultLine(t: Transaction): DraftLine {
   return {
     amountText: '',
     type: t.type as TxnType,
-    category: t.category,
+    // [FIX] t.category is string | null (a genuinely uncategorized
+    // transaction is a real case, not just a declined one), but
+    // DraftLine.category is declared string. Falls back to the first
+    // category for this type if there's no category yet, then '' if even
+    // that's unavailable — same "nothing selected yet, not broken" intent
+    // as the equivalent fix in EditModal.tsx.
+    category: t.category ?? def?.category ?? '',
     subCategory: t.sub_category ?? def?.subCategories?.[0],
     merchant: t.merchant ?? '',
   };
@@ -54,7 +74,12 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
 
   if (!transaction) return null;
 
-  const targetAmount = Math.abs(transaction.amount);
+  // [FIX] transaction.amount is number | null (declined-transaction
+  // placeholders — see transactions.ts's Transaction type). A declined row
+  // has nothing to split in practice, but falling back to 0 keeps this a
+  // type-safe no-crash state (an empty target, "does not match" until
+  // lines are added) rather than a compile error or a runtime NaN.
+  const targetAmount = Math.abs(transaction.amount ?? 0);
   const runningTotal = lines.reduce((sum, l) => sum + (parseFloat(l.amountText) || 0), 0);
   const matches = Math.abs(runningTotal - targetAmount) < 0.005;
 
@@ -89,6 +114,22 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
               Break this into 2 or more transactions — e.g. a shared bill, or items that belong in different
               categories. Each line is checked against the ₹5,000 review rule on its own.
             </Text>
+
+            {/* [ADD] Same reasoning as EditModal.tsx — deciding how to split
+                a transaction needs the original message as context just as
+                much as a plain edit does, arguably more (you're deciding
+                how to divide an amount across categories, not just
+                confirming one). */}
+            {transaction.raw_text ? (
+              <View style={styles.rawTextBox}>
+                <Text style={styles.rawTextLabel}>
+                  {transaction.status === 'pending_review' || transaction.status === 'haiku_suggested'
+                    ? 'Original SMS — check this before splitting'
+                    : 'Original SMS'}
+                </Text>
+                <Text style={styles.rawTextContent}>{transaction.raw_text}</Text>
+              </View>
+            ) : null}
 
             <View style={styles.summaryBox}>
               <Text style={styles.summaryText}>
@@ -199,6 +240,27 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.dark, marginBottom: spacing.xs },
   subtitle: { fontSize: fontSize.sm, color: colors.muted, marginBottom: spacing.md, lineHeight: 18 },
+  rawTextBox: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  rawTextLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.mid,
+    marginBottom: spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  rawTextContent: {
+    fontSize: fontSize.xs,
+    color: colors.dark,
+    lineHeight: 17,
+  },
   summaryBox: {
     backgroundColor: colors.surface,
     borderWidth: 1,

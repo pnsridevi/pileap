@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { router } from 'expo-router';
-import { sendOtp, verifyOtpAndSignIn } from '@/lib/auth';
+import { sendOtp, verifyOtpAndSignIn, testSignInWithPhone, TEST_AUTH_MODE } from '@/lib/auth';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
 
 export default function SignInScreen() {
@@ -13,6 +13,11 @@ export default function SignInScreen() {
 
   async function handleSendOtp() {
     setError(null);
+    if (TEST_AUTH_MODE) {
+      // Test mode: skip the real SMS send entirely, just move to the OTP screen.
+      setStep('otp');
+      return;
+    }
     setLoading(true);
     const { error } = await sendOtp(phone);
     setLoading(false);
@@ -23,7 +28,9 @@ export default function SignInScreen() {
   async function handleVerifyOtp() {
     setError(null);
     setLoading(true);
-    const { data, error } = await verifyOtpAndSignIn(phone, otp);
+    const { data, error } = TEST_AUTH_MODE
+      ? await testSignInWithPhone(phone, otp)
+      : await verifyOtpAndSignIn(phone, otp);
     setLoading(false);
     if (error || !data.session) { setError(error?.message ?? 'Invalid code'); return; }
     router.replace('/(app)/report-card');

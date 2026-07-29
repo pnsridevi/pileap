@@ -1238,6 +1238,20 @@ export async function fetchTransactions(filters: TransactionFilters = {}) {
     // declined ones.
     .or('parse_failure.is.null,parse_failure.neq.declined_transaction')
     .order('txn_date', { ascending: false })
+    // [FIX] Real bug found this session: ordering by txn_date alone is
+    // NOT deterministic across separate paginated queries when multiple
+    // rows share the same txn_date (common — most days have several
+    // transactions). Postgres doesn't guarantee stable ordering for tied
+    // rows between independent range()-limited queries, so a tied row
+    // near a page boundary could fall into the gap between two pages'
+    // windows and never appear on ANY page — while total count() stayed
+    // accurate, since counting doesn't care about row order. Confirmed
+    // against real data: a transaction was reachable via a direct SQL
+    // query and correctly included in the 82-row count, but never
+    // appeared across all 5 paginated UI pages. Adding `id` (always
+    // unique) as a secondary sort key makes the order fully deterministic
+    // — same page contents every time, no gaps, no duplicates.
+    .order('id', { ascending: true })
     .range(page * pageSize, page * pageSize + pageSize - 1);
 
   if (statuses && statuses.length > 0) {

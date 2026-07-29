@@ -100,6 +100,16 @@ export default function AppLayout() {
         },
       }}
     >
+      {/* [ADD] Test SMS tab — temporary, for easy access during testing.
+          [ORDER — per request] Test SMS first, then Transactions, then
+          Profile. */}
+      <Tabs.Screen
+        name="test-sms"
+        options={{
+          title: 'Test SMS',
+          tabBarIcon: ({ color }) => <TestSmsIcon color={color} />,
+        }}
+      />
       {/* [COMMENTED OUT — temporary, testing request] Uncomment to restore.
       <Tabs.Screen
         name="report-card"
@@ -139,14 +149,6 @@ export default function AppLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color }) => <ProfileIcon color={color} />,
-        }}
-      />
-      {/* [ADD] Test SMS tab — temporary, for easy access during testing. */}
-      <Tabs.Screen
-        name="test-sms"
-        options={{
-          title: 'Test SMS',
-          tabBarIcon: ({ color }) => <TestSmsIcon color={color} />,
         }}
       />
     </Tabs>

@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import {
   fetchCustomCategoriesForDisplay,
@@ -69,7 +70,7 @@ export default function CustomCategoriesScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Custom Categories</Text>
         <Text style={styles.subtitle}>
@@ -113,7 +114,7 @@ export default function CustomCategoriesScreen() {
           )}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

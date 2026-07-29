@@ -1,6 +1,7 @@
 import {
-  View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator, ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Rect, Polyline } from 'react-native-svg';
 import { useCallback, useEffect, useState } from 'react';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
@@ -112,7 +113,8 @@ export default function AccountsTab() {
   };
 
   return (
-    <View style={s.wrap}>
+    <SafeAreaView style={s.safe} edges={['top']}>
+      <ScrollView contentContainerStyle={s.wrap} showsVerticalScrollIndicator={false}>
 
       {SHOW_DATA_SOURCE_CARDS && (
       <>
@@ -245,14 +247,16 @@ export default function AccountsTab() {
         ))
       )}
 
-    </View>
+    </ScrollView>
+    </SafeAreaView>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  wrap: { width: '100%' },
+  safe: { flex: 1, backgroundColor: colors.surface },
+  wrap: { width: '100%', padding: spacing.md, paddingBottom: spacing.xl },
 
   sectionLabel: {
     fontSize: fontSize.xs,

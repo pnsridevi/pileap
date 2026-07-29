@@ -1,20 +1,12 @@
-import { Alert } from 'react-native';
-if (typeof ErrorUtils !== 'undefined') {
-  const defaultHandler = ErrorUtils.getGlobalHandler();
-  ErrorUtils.setGlobalHandler((error, isFatal) => {
-    Alert.alert(
-      isFatal ? 'Fatal Error' : 'Error',
-      `${error.name}: ${error.message}\n\n${error.stack?.slice(0, 800)}`
-    );
-    defaultHandler(error, isFatal);
-  });
-}
 import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { colors } from '@/constants/theme';
+
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const { isLoading, isLoggedIn, setSession } = useAuthStore();
@@ -22,6 +14,7 @@ export default function RootLayout() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      SplashScreen.hideAsync();
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);

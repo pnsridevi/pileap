@@ -12,10 +12,17 @@ export default function RootLayout() {
   const { isLoading, isLoggedIn, setSession } = useAuthStore();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      SplashScreen.hideAsync();
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+      })
+      .catch(() => {
+        setSession(null);
+      })
+      .finally(() => {
+        SplashScreen.hideAsync();
+      });
+
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });

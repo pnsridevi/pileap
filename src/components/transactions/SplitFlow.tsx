@@ -20,6 +20,16 @@
  * matchable by merchant_key if that's ever needed later. Flagging, not
  * fixing — that's a call for whoever owns the RPC, not this file.
  *
+ * [ADD] Custom category/subcategory entry per line — same feature and same
+ * reasoning as EditModal.tsx's own "+ Add new" chips (see that file's
+ * top-of-file comment for the full explanation). Since a split has
+ * multiple independent lines, the add-new input state (whether the box is
+ * open, and what's typed into it) lives ON each DraftLine rather than as
+ * one shared piece of component state — otherwise typing a new category
+ * for Line 2 would also affect Line 1's input. Confirming a brand-new
+ * category on a line defaults that line's subCategory to the same string,
+ * same as EditModal, so sub_category is never left null.
+ *
  * Uses ui/Button and ui/Input for text fields and footer actions. Type/
  * category/sub-category stay as custom chips — same reasoning as
  * EditModal.tsx.
@@ -38,6 +48,11 @@ interface DraftLine {
   category: string;
   subCategory?: string;
   merchant: string;
+  // [ADD] Per-line "+ Add new" input state — see top-of-file comment.
+  addingCategory: boolean;
+  newCategoryText: string;
+  addingSubCategory: boolean;
+  newSubCategoryText: string;
 }
 
 interface Props {
@@ -61,15 +76,25 @@ function makeDefaultLine(t: Transaction): DraftLine {
     category: t.category ?? def?.category ?? '',
     subCategory: t.sub_category ?? def?.subCategories?.[0],
     merchant: t.merchant ?? '',
+    addingCategory: false,
+    newCategoryText: '',
+    addingSubCategory: false,
+    newSubCategoryText: '',
   };
 }
 
 export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   const [lines, setLines] = useState<DraftLine[]>(transaction ? [makeDefaultLine(transaction), makeDefaultLine(transaction)] : []);
+  // [ADD] Inline validation error shown above the footer buttons — same
+  // pattern as EditModal.tsx.
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Reset draft lines whenever a new transaction is opened for splitting.
   useMemo(() => {
-    if (transaction) setLines([makeDefaultLine(transaction), makeDefaultLine(transaction)]);
+    if (transaction) {
+      setLines([makeDefaultLine(transaction), makeDefaultLine(transaction)]);
+      setFormError(null);
+    }
   }, [transaction?.id]);
 
   if (!transaction) return null;
@@ -90,8 +115,57 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   const addLine = () => setLines((prev) => [...prev, makeDefaultLine(transaction)]);
   const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx));
 
+  // [ADD] Confirms the typed category name for one line. Defaults that
+  // line's subCategory to the same string — see this file's top-of-file
+  // comment for why.
+  const handleAddCategory = (idx: number) => {
+    const trimmed = lines[idx].newCategoryText.trim();
+    if (!trimmed) return;
+    updateLine(idx, {
+      category: trimmed,
+      subCategory: trimmed,
+      newCategoryText: '',
+      addingCategory: false,
+    });
+    setFormError(null);
+  };
+
+  // [ADD] Confirms a typed subcategory name for one line — works whether
+  // the line's category is a real TAXONOMY entry or a custom one just
+  // typed in above.
+  const handleAddSubCategory = (idx: number) => {
+    const trimmed = lines[idx].newSubCategoryText.trim();
+    if (!trimmed) return;
+    updateLine(idx, {
+      subCategory: trimmed,
+      newSubCategoryText: '',
+      addingSubCategory: false,
+    });
+    setFormError(null);
+  };
+
+  // [FIX] Previously only checked matches/line-count, silently no-opping
+  // otherwise with a bare TODO comment. Now also checks every line has a
+  // non-empty category (a line's category can legitimately start out as
+  // '' — see makeDefaultLine's fallback chain — so this null/empty check
+  // has to live here, not just rely on TAXONOMY always providing one) and
+  // surfaces a real inline message for every failure case instead of
+  // failing silently.
   const handleSubmit = () => {
-    if (!matches || lines.length < 2) return; // TODO: inline validation message instead of silent no-op
+    if (lines.length < 2) {
+      setFormError('Add at least two lines to split this transaction.');
+      return;
+    }
+    const emptyCategoryIdx = lines.findIndex((l) => !l.category.trim());
+    if (emptyCategoryIdx !== -1) {
+      setFormError(`Line ${emptyCategoryIdx + 1} needs a category before you can submit.`);
+      return;
+    }
+    if (!matches) {
+      setFormError('Split total must match the original amount.');
+      return;
+    }
+    setFormError(null);
 
     const splitLines: SplitLineInput[] = lines.map((l) => ({
       amount: signedAmount(parseFloat(l.amountText) || 0, l.type, l.subCategory),
@@ -139,7 +213,13 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
 
             {lines.map((line, idx) => {
               const categoryDefs = TAXONOMY[line.type] ?? [];
-              const subOptions = categoryDefs.find((c) => c.category === line.category)?.subCategories ?? [];
+              const activeCategoryDef = categoryDefs.find((c) => c.category === line.category);
+              const subOptions = activeCategoryDef?.subCategories ?? [];
+              // [ADD] Same custom-category/subcategory detection as
+              // EditModal.tsx, computed per line.
+              const isCustomCategory = line.category !== '' && !activeCategoryDef;
+              const isCustomSubCategory = !!line.subCategory && !subOptions.includes(line.subCategory);
+
               return (
                 <View key={idx} style={styles.lineBox}>
                   <View style={styles.lineHeader}>
@@ -163,7 +243,17 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
                         style={[styles.chip, line.type === t && styles.chipActive]}
                         onPress={() => {
                           const firstCat = TAXONOMY[t]?.[0];
-                          updateLine(idx, { type: t, category: firstCat?.category ?? '', subCategory: firstCat?.subCategories?.[0] });
+                          updateLine(idx, {
+                            type: t,
+                            category: firstCat?.category ?? '',
+                            subCategory: firstCat?.subCategories?.[0],
+                            // [ADD] Switching type invalidates any
+                            // in-progress custom entry for this line.
+                            addingCategory: false,
+                            newCategoryText: '',
+                            addingSubCategory: false,
+                            newSubCategoryText: '',
+                          });
                         }}
                       >
                         <Text style={[styles.chipText, line.type === t && styles.chipTextActive]}>{t}</Text>
@@ -175,27 +265,121 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
                       <TouchableOpacity
                         key={c.category}
                         style={[styles.chip, line.category === c.category && styles.chipActive]}
-                        onPress={() => updateLine(idx, { category: c.category, subCategory: c.subCategories?.[0] })}
+                        onPress={() => updateLine(idx, {
+                          category: c.category,
+                          subCategory: c.subCategories?.[0],
+                          // [ADD] Picking a real chip cancels any pending
+                          // "+ Add new" entry for this line.
+                          addingCategory: false,
+                          newCategoryText: '',
+                          addingSubCategory: false,
+                          newSubCategoryText: '',
+                        })}
                       >
                         <Text style={[styles.chipText, line.category === c.category && styles.chipTextActive]}>
                           {c.category}
                         </Text>
                       </TouchableOpacity>
                     ))}
+                    {/* [ADD] Keeps a custom (non-TAXONOMY) category visible
+                        as its own active chip — same pattern as
+                        EditModal.tsx. */}
+                    {isCustomCategory && (
+                      <View style={[styles.chip, styles.chipActive]}>
+                        <Text style={[styles.chipText, styles.chipTextActive]}>{line.category}</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity
+                      style={styles.addChip}
+                      onPress={() => updateLine(idx, { addingCategory: true })}
+                    >
+                      <Text style={styles.addChipText}>+ Add new</Text>
+                    </TouchableOpacity>
                   </View>
-                  {subOptions.length > 0 && (
-                    <View style={styles.chipRow}>
-                      {subOptions.map((s) => (
-                        <TouchableOpacity
-                          key={s}
-                          style={[styles.chip, line.subCategory === s && styles.chipActive]}
-                          onPress={() => updateLine(idx, { subCategory: s })}
-                        >
-                          <Text style={[styles.chipText, line.subCategory === s && styles.chipTextActive]}>{s}</Text>
-                        </TouchableOpacity>
-                      ))}
+
+                  {line.addingCategory && (
+                    <View style={styles.addInputRow}>
+                      <View style={styles.addInputField}>
+                        <Input
+                          value={line.newCategoryText}
+                          onChangeText={(v) => updateLine(idx, { newCategoryText: v })}
+                          placeholder="New category name"
+                          autoFocus
+                        />
+                      </View>
+                      <Button
+                        label="Add"
+                        variant="primary"
+                        size="sm"
+                        disabled={!line.newCategoryText.trim()}
+                        onPress={() => handleAddCategory(idx)}
+                      />
+                      <Button
+                        label="Cancel"
+                        variant="ghost"
+                        size="sm"
+                        onPress={() => updateLine(idx, { addingCategory: false, newCategoryText: '' })}
+                      />
                     </View>
                   )}
+
+                  {/* [CHANGE] Was gated on subOptions.length > 0 — now shown
+                      whenever this line has a category selected, so
+                      "+ Add new" is always reachable (matches EditModal.tsx's
+                      same change and the same reasoning). */}
+                  {line.category !== '' && (
+                    <>
+                      <View style={styles.chipRow}>
+                        {subOptions.map((s) => (
+                          <TouchableOpacity
+                            key={s}
+                            style={[styles.chip, line.subCategory === s && styles.chipActive]}
+                            onPress={() => updateLine(idx, { subCategory: s })}
+                          >
+                            <Text style={[styles.chipText, line.subCategory === s && styles.chipTextActive]}>{s}</Text>
+                          </TouchableOpacity>
+                        ))}
+                        {isCustomSubCategory && (
+                          <View style={[styles.chip, styles.chipActive]}>
+                            <Text style={[styles.chipText, styles.chipTextActive]}>{line.subCategory}</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={styles.addChip}
+                          onPress={() => updateLine(idx, { addingSubCategory: true })}
+                        >
+                          <Text style={styles.addChipText}>+ Add new</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {line.addingSubCategory && (
+                        <View style={styles.addInputRow}>
+                          <View style={styles.addInputField}>
+                            <Input
+                              value={line.newSubCategoryText}
+                              onChangeText={(v) => updateLine(idx, { newSubCategoryText: v })}
+                              placeholder="New subcategory name"
+                              autoFocus
+                            />
+                          </View>
+                          <Button
+                            label="Add"
+                            variant="primary"
+                            size="sm"
+                            disabled={!line.newSubCategoryText.trim()}
+                            onPress={() => handleAddSubCategory(idx)}
+                          />
+                          <Button
+                            label="Cancel"
+                            variant="ghost"
+                            size="sm"
+                            onPress={() => updateLine(idx, { addingSubCategory: false, newSubCategoryText: '' })}
+                          />
+                        </View>
+                      )}
+                    </>
+                  )}
+
                   <Input
                     value={line.merchant}
                     onChangeText={(v) => updateLine(idx, { merchant: v })}
@@ -218,9 +402,24 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
               </Text>
             </View>
 
+            {/* [ADD] Hint shown whenever any line is missing a category —
+                explains why Submit is disabled before the user even taps it. */}
+            {lines.some((l) => !l.category.trim()) && (
+              <Text style={styles.formError}>Every line needs a category before you can submit.</Text>
+            )}
+            {/* [ADD] Fallback inline error from handleSubmit's own guards
+                (e.g. fewer than 2 lines) — the disabled prop below already
+                covers most cases, this covers the rest. */}
+            {formError && <Text style={styles.formError}>{formError}</Text>}
+
             <View style={styles.footer}>
               <Button label="Cancel" variant="ghost" onPress={onCancel} />
-              <Button label="Submit Split" variant="primary" onPress={handleSubmit} disabled={!matches} />
+              <Button
+                label="Submit Split"
+                variant="primary"
+                onPress={handleSubmit}
+                disabled={!matches || lines.length < 2 || lines.some((l) => !l.category.trim())}
+              />
             </View>
           </ScrollView>
         </View>
@@ -293,6 +492,32 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   chipText: { fontSize: fontSize.xs, color: colors.mid, fontWeight: fontWeight.medium },
   chipTextActive: { color: colors.white },
+  // [ADD] "+ Add new" chip — same dashed-border treatment as EditModal.tsx,
+  // so it reads as an action rather than a selectable option.
+  addChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.brand,
+    borderStyle: 'dashed',
+    backgroundColor: colors.white,
+  },
+  addChipText: {
+    fontSize: fontSize.xs,
+    color: colors.brand,
+    fontWeight: fontWeight.semibold,
+  },
+  // [ADD] Inline row shown under a line's chips while typing a new
+  // category/subcategory name for that line.
+  addInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+  },
+  addInputField: {
+    flex: 1,
+  },
   addLineBtn: { paddingVertical: spacing.sm, marginBottom: spacing.md },
   addLineText: { fontSize: fontSize.sm, color: colors.brand, fontWeight: fontWeight.semibold },
   totalsBox: {
@@ -306,5 +531,11 @@ const styles = StyleSheet.create({
   },
   totalsText: { fontSize: fontSize.sm, color: colors.mid },
   matchStatus: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  // [ADD] Inline validation error/hint, shown above the footer buttons.
+  formError: {
+    fontSize: fontSize.xs,
+    color: colors.red,
+    marginBottom: spacing.sm,
+  },
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginBottom: spacing.md },
 });

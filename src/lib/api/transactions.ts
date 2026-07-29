@@ -110,7 +110,7 @@
 
 import { supabase } from '../supabase';
 import type { ParsedTransaction, BalanceUpdate, Classification } from '../smsParser';
-import { isBalanceUpdate, matchCustomCategory, matchRegisteredFact } from '../smsParser';
+import { isBalanceUpdate, matchCustomCategory, matchRegisteredFact, normaliseMerchantKey } from '../smsParser';
 // [ADD] Needed by reconcilePendingTransactions() below — same fetch
 // functions test-sms.tsx already uses to build a MatchContext at parse
 // time, reused here to re-check rows that were already inserted before a
@@ -1633,4 +1633,80 @@ export async function reconcilePendingTransactions(): Promise<ReconcileResult> {
   }
 
   return { checked: rows.length, resolved };
+}
+
+// ─── Manual transaction entry ───────────────────────────────────────────────
+//
+// [ADD] Direct insert path for user-typed transactions (Add Transaction
+// screen), distinct from insertTransaction() above — that function is the
+// SMS-ingestion path: it resolves accounts via resolveAccountId(), runs
+// duplicate/contra detection, provisional-credit reconciliation, etc., all
+// of which assume a ParsedTransaction coming from smsParser.ts. None of
+// that applies here — per explicit product decision this session, manual
+// entries skip duplicate detection entirely, and the account is already
+// known (chosen directly by the user in the form, not inferred from SMS
+// text) so resolveAccountId() has nothing to resolve.
+//
+// Every field below is set deliberately against the real transactions
+// table DDL (not guessed from the TS Transaction type, which only reflects
+// nullability, not actual constraints):
+//   - status: 'user_reviewed' — per product decision, manual entries skip
+//     the review queue entirely (they're already fully user-confirmed,
+//     there's nothing to review).
+//   - source: 'manual' — distinct from the 'cash' value also present in
+//     transactions_source_check; 'cash' vs a real bank account is already
+//     captured via account_id/accounts.account_type, so source here stays
+//     'manual' regardless of which account was chosen. Keeps "how was this
+//     entered" (source) and "which account" (account_id) as two separate
+//     facts rather than conflating them.
+//   - reviewed_at: set to now — mirrors status being immediately
+//     'user_reviewed'.
+//   - raw_text: null — no source SMS exists for a manual entry.
+//   - ref_number/ref_type, possible_contra_of, possible_duplicate_of,
+//     duplicate_confidence, resolved_from, parse_failure, txn_group_id,
+//     health_module_tag: all omitted (left to their column defaults/null)
+//     — none of the detection passes that would populate these ever run
+//     for a manual entry.
+//   - is_deleted/added_late/is_infrastructure/is_contra: omitted, rely on
+//     the DDL's own `default false` for each.
+export interface ManualTransactionInput {
+  txn_date: string; // 'YYYY-MM-DD'
+  /** Signed — positive for money in, negative for money out. Caller
+   * computes this via transactionCategories.ts's signedAmount(), same as
+   * EditModal/SplitFlow already do, so the sign logic stays in that one
+   * place rather than being reimplemented here. */
+  amount: number;
+  type: 'Expense' | 'Income' | 'Investment' | 'Liability' | 'Asset';
+  category: string;
+  sub_category: string | null;
+  merchant: string | null;
+  account_id: string;
+}
+
+export async function insertManualTransaction(input: ManualTransactionInput): Promise<{ id: string }> {
+  const userId = await getCurrentUserId();
+  const merchantKey = input.merchant ? normaliseMerchantKey(input.merchant) : null;
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert({
+      user_id:       userId,
+      account_id:    input.account_id,
+      txn_date:      input.txn_date,
+      amount:        input.amount,
+      type:          input.type,
+      category:      input.category,
+      sub_category:  input.sub_category,
+      merchant:      input.merchant,
+      merchant_key:  merchantKey,
+      source:        'manual',
+      status:        'user_reviewed',
+      reviewed_at:   new Date().toISOString(),
+      raw_text:      null,
+    })
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  return { id: data.id };
 }

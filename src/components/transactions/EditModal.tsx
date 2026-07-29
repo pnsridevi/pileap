@@ -20,8 +20,24 @@
  * ("bulk status promotion... for everything visible on the page"), not
  * something introduced here.
  *
- * Uses ui/Button and ui/Input for the text fields and footer actions.
- * Type/category/sub-category stay as custom chips below — they're a
+ * [ADD] Custom category/subcategory entry. TAXONOMY (transactionTaxonomy.ts)
+ * is a fixed, hand-maintained list — it can't cover every real merchant
+ * (a local shop, a P2P payee) or every category a user might want (e.g.
+ * "Pet Care"). custom_categories itself is schema-free-text on category/
+ * sub_category (see the table's DDL — no check constraint on those two
+ * columns), and saveCustomCategory() below already accepts any string, so
+ * the only real gap was the UI never offering a way to type one. Both the
+ * Category and Subcategory chip rows now end in a "+ Add new" chip that
+ * reveals a text input. Confirming a brand-new CATEGORY also defaults
+ * sub_category to that same string (never leaves it null) — the user can
+ * then immediately override it with a real subcategory via the
+ * Subcategory row's own "+ Add new" if they want one. This mirrors how
+ * signedAmount()/POSITIVE_SUB_CATEGORIES already work: they're just string
+ * checks against sub_category, so a subcategory equal to its category name
+ * behaves like any other ordinary (non-manual-only) subcategory, sign-wise.
+ *
+ * Uses ui/Button and ui/Input for the text fields and footer actions. Type/
+ * category/sub-category stay as custom chips below — they're a
  * multi-select-style picker, not a text field or single action, so Input/
  * Button don't fit them.
  */
@@ -56,6 +72,19 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
   const [merchant, setMerchant] = useState('');
   const [saveCustom, setSaveCustom] = useState(false);
 
+  // [ADD] Inline "+ Add new" text-entry state for category/subcategory.
+  // Kept as plain component state (not part of the taxonomy) — these are
+  // ephemeral input-box toggles, not draft transaction data.
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryText, setNewCategoryText] = useState('');
+  const [addingSubCategory, setAddingSubCategory] = useState(false);
+  const [newSubCategoryText, setNewSubCategoryText] = useState('');
+
+  // [ADD] Inline validation error shown just above the footer buttons —
+  // replaces the previous silent no-op on an invalid save (see the old
+  // "TODO: surface inline validation error" on handleSave below).
+  const [formError, setFormError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!transaction) return;
     setTxnDate(transaction.txn_date);
@@ -85,6 +114,14 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
     setSubCategory(transaction.sub_category ?? undefined);
     setMerchant(transaction.merchant ?? '');
     setSaveCustom(false);
+    // [ADD] Reset the add-new input boxes every time a different
+    // transaction is opened, so a half-typed category name from a
+    // previously-opened row never leaks into this one.
+    setAddingCategory(false);
+    setNewCategoryText('');
+    setAddingSubCategory(false);
+    setNewSubCategoryText('');
+    setFormError(null);
   }, [transaction]);
 
   if (!transaction) return null;
@@ -92,23 +129,85 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
   const categoryDefs = TAXONOMY[type] ?? [];
   const activeCategoryDef = categoryDefs.find((c) => c.category === category);
   const subCategoryOptions = activeCategoryDef?.subCategories ?? [];
+  // [ADD] True when the currently-selected category isn't one of this
+  // type's TAXONOMY entries at all — i.e. it was typed in via "+ Add new"
+  // (this session or a previous one, now stored on the transaction/draft).
+  const isCustomCategory = category !== '' && !activeCategoryDef;
+  // [ADD] Same idea for subcategory — true when it's set but isn't in the
+  // known list for the active category (covers both a custom category's
+  // subcategory, and a hand-typed extra subcategory under a real category).
+  const isCustomSubCategory = !!subCategory && !subCategoryOptions.includes(subCategory);
 
   const handleTypeChange = (next: TxnType) => {
     setType(next);
     const firstCat = TAXONOMY[next]?.[0];
     setCategory(firstCat?.category ?? '');
     setSubCategory(firstCat?.subCategories?.[0]);
+    // [ADD] Switching type invalidates any in-progress custom entry.
+    setAddingCategory(false);
+    setNewCategoryText('');
+    setAddingSubCategory(false);
+    setNewSubCategoryText('');
   };
 
   const handleCategoryChange = (next: string) => {
     setCategory(next);
     const def = categoryDefs.find((c) => c.category === next);
     setSubCategory(def?.subCategories?.[0]);
+    // [ADD] Picking a real chip cancels any pending "+ Add new" entry.
+    setAddingCategory(false);
+    setNewCategoryText('');
+    setAddingSubCategory(false);
+    setNewSubCategoryText('');
   };
 
+  // [ADD] Confirms the typed category name. Defaults subCategory to the
+  // same string — see this file's top-of-file comment for why: it keeps
+  // sub_category non-null without forcing the user through an extra step,
+  // while still letting them immediately override it below if they want a
+  // real subcategory.
+  const handleAddCategory = () => {
+    // [ADD] Null/empty check lives here in the form itself — trims
+    // whitespace-only input to nothing, so "   " can't be confirmed as a
+    // category name. The Add button is also disabled below while this is
+    // empty, so this is a defensive second check, not the only one.
+    const trimmed = newCategoryText.trim();
+    if (!trimmed) return;
+    setCategory(trimmed);
+    setSubCategory(trimmed);
+    setNewCategoryText('');
+    setAddingCategory(false);
+    setFormError(null);
+  };
+
+  // [ADD] Confirms a typed subcategory name — works whether the parent
+  // category is a real TAXONOMY entry or one just typed in above.
+  const handleAddSubCategory = () => {
+    // [ADD] Same null/empty guard as handleAddCategory above.
+    const trimmed = newSubCategoryText.trim();
+    if (!trimmed) return;
+    setSubCategory(trimmed);
+    setNewSubCategoryText('');
+    setAddingSubCategory(false);
+    setFormError(null);
+  };
+
+  // [FIX] Previously only validated amount, silently no-opping on an empty
+  // category with a bare TODO comment. Now validates category too, and
+  // surfaces a real inline message instead of failing silently — a user
+  // tapping Save with no category selected would otherwise see nothing
+  // happen at all, with no indication why.
   const handleSave = () => {
     const magnitude = parseFloat(amountText);
-    if (Number.isNaN(magnitude) || magnitude <= 0) return; // TODO: surface inline validation error rather than silently no-op
+    if (Number.isNaN(magnitude) || magnitude <= 0) {
+      setFormError('Enter a valid amount before saving.');
+      return;
+    }
+    if (!category.trim()) {
+      setFormError('Select an existing category, or add a new one, before saving.');
+      return;
+    }
+    setFormError(null);
 
     const edit: TransactionEdit = {
       id: transaction.id,
@@ -199,9 +298,57 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
                   </Text>
                 </TouchableOpacity>
               ))}
+              {/* [ADD] The currently-selected category when it's NOT one of
+                  this type's known TAXONOMY entries — i.e. a custom category,
+                  either just typed in below or already saved on this
+                  transaction from a previous edit. Rendered as a static
+                  active chip (not tappable — it's already selected) so it
+                  doesn't disappear from view. */}
+              {isCustomCategory && (
+                <View style={[styles.chip, styles.chipActive]}>
+                  <Text style={[styles.chipText, styles.chipTextActive]}>{category}</Text>
+                </View>
+              )}
+              <TouchableOpacity style={styles.addChip} onPress={() => setAddingCategory(true)}>
+                <Text style={styles.addChipText}>+ Add new</Text>
+              </TouchableOpacity>
             </View>
 
-            {subCategoryOptions.length > 0 && (
+            {addingCategory && (
+              <View style={styles.addInputRow}>
+                <View style={styles.addInputField}>
+                  <Input
+                    value={newCategoryText}
+                    onChangeText={setNewCategoryText}
+                    placeholder="New category name"
+                    autoFocus
+                  />
+                </View>
+                <Button
+                  label="Add"
+                  variant="primary"
+                  size="sm"
+                  disabled={!newCategoryText.trim()}
+                  onPress={handleAddCategory}
+                />
+                <Button
+                  label="Cancel"
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => { setAddingCategory(false); setNewCategoryText(''); }}
+                />
+              </View>
+            )}
+
+            {/* [CHANGE] Was gated on subCategoryOptions.length > 0, which
+                hid this whole section for categories with no predefined
+                subcategories (e.g. Personal Care) and for any custom
+                category (which never has predefined subcategories at all).
+                Now shown whenever a category is selected, so "+ Add new"
+                is always reachable — this is the row that lets a user
+                override the auto-filled (category-name) subcategory with a
+                real one. */}
+            {category !== '' && (
               <>
                 <Text style={styles.label}>Subcategory</Text>
                 <View style={styles.chipRow}>
@@ -214,7 +361,45 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
                       <Text style={[styles.chipText, subCategory === s && styles.chipTextActive]}>{s}</Text>
                     </TouchableOpacity>
                   ))}
+                  {/* [ADD] Same pattern as the custom-category chip above —
+                      keeps a hand-typed subcategory (including the
+                      auto-filled "same as category" default) visibly
+                      selected even though it isn't in subCategoryOptions. */}
+                  {isCustomSubCategory && (
+                    <View style={[styles.chip, styles.chipActive]}>
+                      <Text style={[styles.chipText, styles.chipTextActive]}>{subCategory}</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity style={styles.addChip} onPress={() => setAddingSubCategory(true)}>
+                    <Text style={styles.addChipText}>+ Add new</Text>
+                  </TouchableOpacity>
                 </View>
+
+                {addingSubCategory && (
+                  <View style={styles.addInputRow}>
+                    <View style={styles.addInputField}>
+                      <Input
+                        value={newSubCategoryText}
+                        onChangeText={setNewSubCategoryText}
+                        placeholder="New subcategory name"
+                        autoFocus
+                      />
+                    </View>
+                    <Button
+                      label="Add"
+                      variant="primary"
+                      size="sm"
+                      disabled={!newSubCategoryText.trim()}
+                      onPress={handleAddSubCategory}
+                    />
+                    <Button
+                      label="Cancel"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => { setAddingSubCategory(false); setNewSubCategoryText(''); }}
+                    />
+                  </View>
+                )}
               </>
             )}
 
@@ -232,6 +417,10 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
                 Pileap will auto-apply it.
               </Text>
             </View>
+
+            {/* [ADD] Inline validation error — replaces the previous silent
+                no-op on an invalid save. */}
+            {formError && <Text style={styles.formError}>{formError}</Text>}
 
             <View style={styles.footer}>
               <Button label="Cancel" variant="ghost" onPress={onCancel} />
@@ -331,6 +520,34 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.white,
   },
+  // [ADD] "+ Add new" chip — visually distinct (dashed border, brand-
+  // colored text) from a normal selectable category/subcategory chip, so
+  // it reads as an action rather than one more option in the set.
+  addChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.brand,
+    borderStyle: 'dashed',
+    backgroundColor: colors.white,
+  },
+  addChipText: {
+    fontSize: fontSize.xs,
+    color: colors.brand,
+    fontWeight: fontWeight.semibold,
+  },
+  // [ADD] Inline row shown under the chips while typing a new category/
+  // subcategory name.
+  addInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  addInputField: {
+    flex: 1,
+  },
   customCatBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -347,6 +564,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.mid,
     lineHeight: 16,
+  },
+  // [ADD] Inline validation error, shown just above the footer buttons.
+  formError: {
+    fontSize: fontSize.xs,
+    color: colors.red,
+    marginTop: spacing.sm,
   },
   footer: {
     flexDirection: 'row',

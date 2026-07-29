@@ -1,8 +1,10 @@
 import {
-  View, Text, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator,
 } from 'react-native';
 import Svg, { Path, Rect, Polyline } from 'react-native-svg';
+import { useCallback, useEffect, useState } from 'react';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
+import { fetchAccounts, resolveCashAccountId, setAccountActive, type Account } from '@/lib/api/accounts';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,24 @@ function FileIcon() {
   );
 }
 
+// [ADD] Labels for the account-tracking section below — mirrors
+// accounts_account_type_check's allowed values exactly (see the
+// migration run this session that added 'cash' to that constraint).
+const ACCOUNT_TYPE_LABELS: Record<Account['account_type'], string> = {
+  bank: 'Bank Account',
+  credit_card: 'Credit Card',
+  loan: 'Loan',
+  mf: 'Mutual Fund',
+  equity: 'Equity / Demat',
+  insurance: 'Insurance',
+  epf: 'EPF',
+  nps: 'NPS',
+  ppf: 'PPF',
+  fd: 'Fixed Deposit',
+  real_estate: 'Real Estate',
+  cash: 'Cash',
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 // Shows data sources that feed the transactions table only:
 //   • Bank SMS (live, Android)
@@ -32,8 +52,56 @@ function FileIcon() {
 //   • CAMS / NSDL CAS PDF (upload — SIP & lumpsum rows → transactions)
 //
 // EPF, NPS, PPF/FD, Insurance → Modules → Data Inputs (balance-only, no txn rows)
-
+//
+// [ADD] Second concern added this session, below the data-source cards:
+// the actual list of accounts already detected (via SMS/email/PDF
+// parsing) or added manually (Cash), each with a track/untrack toggle
+// (accounts.is_active — see src/lib/api/accounts.ts's docblock for the
+// full reasoning). Deliberately kept in this same file rather than a
+// separate screen — "Accounts" already covers both "how do I connect an
+// account" (above) and "which connected accounts do I actually want
+// tracked" (below); splitting them into two screens would just make the
+// same concept harder to find. Untracking only affects FUTURE
+// transactions — no read path (Feed/History/scores) filters by this flag
+// yet, that's a separate, larger change across several files.
 export default function AccountsTab() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    setLoadingAccounts(true);
+    setAccountsError(null);
+    try {
+      // Ensures Cash always appears in this list, even before the user's
+      // ever made a manual cash entry — avoids "where did this come from"
+      // confusion later.
+      await resolveCashAccountId();
+      const rows = await fetchAccounts();
+      setAccounts(rows);
+    } catch (e) {
+      setAccountsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }, []);
+
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
+
+  const handleToggle = async (account: Account, next: boolean) => {
+    setBusyId(account.id);
+    setAccounts((prev) => prev.map((a) => (a.id === account.id ? { ...a, is_active: next } : a)));
+    try {
+      await setAccountActive(account.id, next);
+    } catch (e) {
+      setAccounts((prev) => prev.map((a) => (a.id === account.id ? { ...a, is_active: !next } : a)));
+      setAccountsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <View style={s.wrap}>
 
@@ -128,6 +196,41 @@ export default function AccountsTab() {
       <TouchableOpacity style={[s.btnPrimary, { marginTop: spacing.sm }]} activeOpacity={0.8}>
         <Text style={s.btnPrimaryText}>Upload Statements →</Text>
       </TouchableOpacity>
+
+      {/* ── [ADD] Your Accounts — track/untrack, added this session ── */}
+      <Text style={[s.sectionLabel, { marginTop: spacing.lg }]}>Your Accounts</Text>
+      <Text style={s.sectionSub}>
+        Turn an account off if you don't want its future transactions tracked — e.g. a shared or relative's
+        account. Existing transactions from it stay visible; only new ones will be skipped.
+      </Text>
+
+      {accountsError && <Text style={s.accountsErrorText}>{accountsError}</Text>}
+
+      {loadingAccounts ? (
+        <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.md }} />
+      ) : accounts.length === 0 ? (
+        <Text style={s.emptyAccountsText}>No accounts detected yet.</Text>
+      ) : (
+        accounts.map((item) => (
+          <View key={item.id} style={s.accountRow}>
+            <View style={s.accountRowLeft}>
+              <Text style={s.cardTitle}>
+                {item.institution_name ?? ACCOUNT_TYPE_LABELS[item.account_type]}
+              </Text>
+              <Text style={s.meta}>
+                {ACCOUNT_TYPE_LABELS[item.account_type]}
+                {item.account_number_masked ? ` · ${item.account_number_masked}` : ''}
+              </Text>
+            </View>
+            <Switch
+              value={item.is_active ?? true}
+              onValueChange={(next) => handleToggle(item, next)}
+              trackColor={{ true: colors.brand }}
+              disabled={busyId === item.id}
+            />
+          </View>
+        ))
+      )}
 
     </View>
   );
@@ -266,4 +369,24 @@ const s = StyleSheet.create({
     color: colors.muted,
     lineHeight: 14,
   },
+
+  // [ADD] "Your Accounts" section styles — deliberately reuse the same
+  // card/badge/sectionLabel language above rather than introducing a
+  // second visual style in the same screen.
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    ...shadows.sm,
+  },
+  accountRowLeft: { flex: 1, paddingRight: spacing.sm },
+  meta: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  accountsErrorText: { fontSize: fontSize.xs, color: colors.red, marginBottom: spacing.sm },
+  emptyAccountsText: { fontSize: fontSize.sm, color: colors.muted, textAlign: 'center', marginTop: spacing.md },
 });

@@ -31,6 +31,13 @@
  *   - Submit calls transactions.ts:submitTransactionPage(), which requires
  *     the submit_transaction_page RPC migration to be applied first (see
  *     supabase/migrations/submit_transaction_page.sql).
+ *
+ * [ADD] ManageMenu — "⋯" icon next to SubTabs, added this session. Custom
+ * Categories / Budget vs Actual / Accounts existed as route files with NO
+ * way to navigate to them from the UI before this — see ManageMenu.tsx's
+ * docblock. Added to all three render branches below (both empty-state
+ * returns and the main return) so it's reachable regardless of whether
+ * this screen currently has any transactions to show.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
@@ -40,6 +47,8 @@ import { TransactionRow, mapTransactionToRow } from '@/components/transactions/T
 import { EditModal } from '@/components/transactions/EditModal';
 import { SplitFlow } from '@/components/transactions/SplitFlow';
 import { RegisterFactPrompt } from '@/components/transactions/RegisterFactPrompt';
+import { ManageMenu } from '@/components/transactions/ManageMenu';
+// [ADD] "+" button — reaches the new Add Transaction screen (manual entry).
 import { Button } from '@/components/ui/Button';
 import { useTransactionFeed } from '@/hooks/useTransactionFeed';
 import { useTransactionStore } from '@/store/transactionStore';
@@ -235,7 +244,15 @@ export default function TransactionsFeedScreen() {
   if (hasAny === false) {
     return (
       <View style={styles.container}>
-        <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+        <View style={styles.topBar}>
+          <View style={{ flex: 1 }}>
+            <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+          </View>
+          <TouchableOpacity onPress={() => router.push('/(app)/transactions/add')} hitSlop={10} style={styles.addBtn}>
+            <Text style={styles.addBtnText}>+</Text>
+          </TouchableOpacity>
+          <ManageMenu />
+        </View>
         <EmptyState
           title="No transactions yet"
           subtitle="Connect a data source or upload past bank statements to see your transactions here."
@@ -247,7 +264,15 @@ export default function TransactionsFeedScreen() {
   if (hasAny === true && !loading && totalCount === 0 && needsReviewCount === 0 && rows.length === 0) {
     return (
       <View style={styles.container}>
-        <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+        <View style={styles.topBar}>
+          <View style={{ flex: 1 }}>
+            <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+          </View>
+          <TouchableOpacity onPress={() => router.push('/(app)/transactions/add')} hitSlop={10} style={styles.addBtn}>
+            <Text style={styles.addBtnText}>+</Text>
+          </TouchableOpacity>
+          <ManageMenu />
+        </View>
         <EmptyState
           title="All transactions reviewed"
           subtitle="Every transaction has been confirmed. View your Transaction History to see past activity."
@@ -260,7 +285,15 @@ export default function TransactionsFeedScreen() {
 
   return (
     <View style={styles.container}>
-      <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+      <View style={styles.topBar}>
+        <View style={{ flex: 1 }}>
+          <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
+        </View>
+        <TouchableOpacity onPress={() => router.push('/(app)/transactions/add')} hitSlop={10} style={styles.addBtn}>
+          <Text style={styles.addBtnText}>+</Text>
+        </TouchableOpacity>
+        <ManageMenu />
+      </View>
 
       <View style={styles.headerRow}>
         <Text style={styles.headerCount}>
@@ -423,12 +456,35 @@ const chipStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
+  // [ADD] Row wrapping SubTabs + ManageMenu — SubTabs keeps its own
+  // internal flex:1-per-side layout, this just gives the "⋯" icon a
+  // fixed-width slot to its right.
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  // [ADD] "+" button — reaches app/(app)/transactions/add.tsx (manual entry).
+  addBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+    backgroundColor: colors.brand,
+  },
+  addBtnText: {
+    fontSize: 18,
+    lineHeight: 18,
+    color: colors.white,
+    fontWeight: fontWeight.bold,
+  },
   subTabRow: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: 3,
-    marginBottom: spacing.sm,
   },
   subTab: {
     flex: 1,

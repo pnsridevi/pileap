@@ -54,6 +54,37 @@ export async function fetchCustomCategories(): Promise<CustomCategoryEntry[]> {
   return (data ?? []) as CustomCategoryEntry[];
 }
 
+// [ADD] Display shape for the Custom Categories management screen
+// (app/(app)/transactions/custom-categories.tsx) — was previously a
+// one-line stub with no way to view saved mappings outside Supabase
+// directly. Unlike fetchCustomCategories() above (which only selects the
+// columns smsParser.ts's matcher needs), this also pulls `id` and the
+// human-readable `merchant` string — needed so the screen can show a
+// real name instead of a normalised key, and so deletion can target an
+// exact row by id rather than re-deriving merchant_key from displayed
+// text (which would only work if normaliseMerchantKey() is provably
+// idempotent — safer to just not depend on that).
+export interface CustomCategoryRow {
+  id: string;
+  merchant: string;
+  merchant_key: string;
+  type: TxnType;
+  category: string;
+  sub_category: string | null;
+}
+
+export async function fetchCustomCategoriesForDisplay(): Promise<CustomCategoryRow[]> {
+  const userId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from('custom_categories')
+    .select('id, merchant, merchant_key, type, category, sub_category')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as CustomCategoryRow[];
+}
+
 // ─── Write ──────────────────────────────────────────────────────────────────
 
 export interface SaveCustomCategoryInput {
@@ -145,5 +176,19 @@ export async function deleteCustomCategory(merchant: string): Promise<void> {
     .delete()
     .eq('user_id', userId)
     .eq('merchant_key', merchantKey);
+  if (error) throw error;
+}
+
+// [ADD] Id-targeted delete for the management screen — see
+// fetchCustomCategoriesForDisplay()'s comment for why this is safer than
+// deleteCustomCategory(merchant) when working from already-fetched rows
+// rather than a merchant string typed fresh into a form.
+export async function deleteCustomCategoryById(id: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  const { error } = await supabase
+    .from('custom_categories')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
   if (error) throw error;
 }

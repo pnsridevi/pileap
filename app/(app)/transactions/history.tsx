@@ -17,11 +17,19 @@
  *   - No draft workspace, no Edit/Split, no Submit — reviewed rows are a
  *     historical record, not something this screen mutates. TransactionRow
  *     is used with onPress/onSplitPress both omitted (both optional props)
- *     to render it fully non-interactive.
+ *     to render it fully non-interactive. [NOTE — carried decision from
+ *     this session] Edit/Split for History was scoped and then explicitly
+ *     put on hold: it depends on whether monthly report-card scores are
+ *     computed live or cached/snapshotted, which isn't decided until
+ *     scores.ts actually exists. Revisit once that's built.
  *   - Page-based Prev/Next, matching the Active feed's pattern (confirmed
  *     with user for Active; carried over here for one consistent
  *     pagination model rather than introducing a second one — flag if you
  *     want infinite scroll here instead, the hook already supports both).
+ *
+ * [ADD] ManageMenu — same "⋯" icon as index.tsx (Feed), added this
+ * session so Custom Categories / Budget vs Actual / Accounts are
+ * reachable from History too, not just Feed.
  *
  * Data flow: transactions table (status = user_reviewed) -> useTransactionFeed.
  */
@@ -29,6 +37,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, 
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import { TransactionRow, mapTransactionToRow } from '@/components/transactions/TransactionRow';
+import { ManageMenu } from '@/components/transactions/ManageMenu';
 import { Button } from '@/components/ui/Button';
 import { useTransactionFeed } from '@/hooks/useTransactionFeed';
 import { useTransactionStore } from '@/store/transactionStore';
@@ -58,10 +67,15 @@ export default function TransactionHistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <SubTabs
-        active="history"
-        onSwitch={() => (router.canGoBack() ? router.back() : router.replace('/(app)/transactions'))}
-      />
+      <View style={styles.topBar}>
+        <View style={{ flex: 1 }}>
+          <SubTabs
+            active="history"
+            onSwitch={() => (router.canGoBack() ? router.back() : router.replace('/(app)/transactions'))}
+          />
+        </View>
+        <ManageMenu />
+      </View>
 
       <View style={styles.headerRow}>
         <Text style={styles.headerCount}>{totalCount} reviewed transactions</Text>
@@ -174,12 +188,19 @@ const chipStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
+  // [ADD] Same topBar wrapper as index.tsx — SubTabs + ManageMenu side by
+  // side.
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   subTabRow: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: 3,
-    marginBottom: spacing.sm,
   },
   subTab: {
     flex: 1,

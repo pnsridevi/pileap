@@ -64,6 +64,15 @@ const ACCOUNT_TYPE_LABELS: Record<Account['account_type'], string> = {
 // same concept harder to find. Untracking only affects FUTURE
 // transactions — no read path (Feed/History/scores) filters by this flag
 // yet, that's a separate, larger change across several files.
+// [ADD] Temporary toggle — the Live Data Sources / Upload Statements cards
+// below are demo/mockup content (no onPress handlers wired up, per the
+// audit earlier this session). Hidden for now per request so the actual
+// account-tracking list is what's visible while testing, rather than
+// competing with non-functional placeholder cards. Flip back to true once
+// those cards are wired up to real functionality — nothing below was
+// deleted, just not rendered.
+const SHOW_DATA_SOURCE_CARDS = false;
+
 export default function AccountsTab() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
@@ -105,6 +114,8 @@ export default function AccountsTab() {
   return (
     <View style={s.wrap}>
 
+      {SHOW_DATA_SOURCE_CARDS && (
+      <>
       {/* ── Live sources ── */}
       <Text style={s.sectionLabel}>Live Data Sources</Text>
 
@@ -196,6 +207,8 @@ export default function AccountsTab() {
       <TouchableOpacity style={[s.btnPrimary, { marginTop: spacing.sm }]} activeOpacity={0.8}>
         <Text style={s.btnPrimaryText}>Upload Statements →</Text>
       </TouchableOpacity>
+      </>
+      )}
 
       {/* ── [ADD] Your Accounts — track/untrack, added this session ── */}
       <Text style={[s.sectionLabel, { marginTop: spacing.lg }]}>Your Accounts</Text>

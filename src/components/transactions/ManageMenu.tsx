@@ -20,7 +20,10 @@ import { colors, radius, spacing, fontSize, fontWeight, shadows } from '@/consta
 
 const MENU_ITEMS = [
   { label: 'Custom Categories', path: '/(app)/transactions/custom-categories' as const },
-  { label: 'Budget vs Actual', path: '/(app)/transactions/budget-vs-actual' as const },
+  // [REMOVED — per request] Budget vs Actual isn't built yet; removed
+  // from the menu for now so it doesn't link to an unfinished stub.
+  // Re-add once that screen has real content:
+  // { label: 'Budget vs Actual', path: '/(app)/transactions/budget-vs-actual' as const },
   { label: 'Accounts', path: '/(app)/transactions/accounts' as const },
 ];
 

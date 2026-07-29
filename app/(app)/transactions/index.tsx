@@ -42,6 +42,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import { TransactionRow, mapTransactionToRow } from '@/components/transactions/TransactionRow';
 import { EditModal } from '@/components/transactions/EditModal';
@@ -66,6 +67,7 @@ import { saveCustomCategory } from '@/lib/api/customCategories';
 
 export default function TransactionsFeedScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const {
     transactions: rows,   // raw Transaction[] for the current page — see useTransactionFeed.ts docblock
@@ -207,12 +209,22 @@ export default function TransactionsFeedScreen() {
 
     if (shouldSaveCustomCategory && edit.merchant && edit.type && edit.category) {
       try {
-        await saveCustomCategory({
+        // [FIX] excludeTransactionId keeps this specific row untouched in
+        // the DB (still draft-only until page Submit — arch doc 5.3.3),
+        // while still letting saveCustomCategory() retroactively fix this
+        // merchant's OTHER Feed transactions right now. Refetching the
+        // feed afterward is what makes those fixes visible immediately —
+        // previously they only became visible on next app reopen.
+        const { retroactivelyUpdated } = await saveCustomCategory({
           merchant: edit.merchant,
           type: edit.type,
           category: edit.category,
           subCategory: edit.sub_category ?? null,
+          excludeTransactionId: edit.id,
         });
+        if (retroactivelyUpdated > 0) {
+          await refreshFeed();
+        }
       } catch (e) {
         console.error('Failed to save custom category preference:', e);
       }
@@ -243,7 +255,7 @@ export default function TransactionsFeedScreen() {
 
   if (hasAny === false) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.topBar}>
           <View style={{ flex: 1 }}>
             <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
@@ -263,7 +275,7 @@ export default function TransactionsFeedScreen() {
 
   if (hasAny === true && !loading && totalCount === 0 && needsReviewCount === 0 && rows.length === 0) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.topBar}>
           <View style={{ flex: 1 }}>
             <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />
@@ -284,7 +296,7 @@ export default function TransactionsFeedScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.topBar}>
         <View style={{ flex: 1 }}>
           <SubTabs active="feed" onSwitch={() => router.push('/(app)/transactions/history')} />

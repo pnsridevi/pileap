@@ -148,7 +148,7 @@ export default function AddTransactionScreen() {
     setFormError(null);
     setSubmitting(true);
     try {
-      await insertManualTransaction({
+      const inserted = await insertManualTransaction({
         txn_date: txnDate,
         amount: signedAmount(magnitude, type, subCategory),
         type,
@@ -160,7 +160,7 @@ export default function AddTransactionScreen() {
 
       if (saveCustom && merchant && category) {
         try {
-          await saveCustomCategory({ merchant, type, category, subCategory: subCategory ?? null });
+          await saveCustomCategory({ merchant, type, category, subCategory: subCategory ?? null, excludeTransactionId: inserted.id });
         } catch (e) {
           console.error('Failed to save custom category preference:', e);
         }

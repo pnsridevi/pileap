@@ -97,6 +97,15 @@ export interface SaveCustomCategoryInput {
   type:          TxnType;
   category:      string;
   subCategory:   string | null;
+  /** [ADD] Excludes this specific transaction id from the retroactive
+   * re-apply below. Needed when called from a draft-workspace edit
+   * (EditModal, via index.tsx's handleSaveEdit) — that row must NOT be
+   * written to the DB until page Submit (arch doc 5.3.3, "nothing written
+   * until Submit"), even though this function needs to retroactively fix
+   * OTHER transactions from the same merchant right now. Omit when
+   * there's no such row (e.g. add.tsx's manual entry, where the insert
+   * already happened separately). */
+  excludeTransactionId?: string;
 }
 
 /**
@@ -106,8 +115,23 @@ export interface SaveCustomCategoryInput {
  * contradictory one. This is exactly the failure mode the merchant_key
  * migration fixed — see the custom_categories schema discussion — so the
  * upsert target is deliberately merchant_key, not merchant.
+ *
+ * [ADD] Also retroactively re-applies the new category to this merchant's
+ * OTHER existing Feed transactions (status != 'user_reviewed'). Fixes a
+ * real reported bug: matchCustomCategory() only ever runs at SMS PARSE
+ * time (new messages), and reconcilePendingTransactions() only touches
+ * genuinely never-categorized rows (category IS NULL) — so a transaction
+ * that already had SOME category (even a stale, since-superseded one)
+ * fell through both mechanisms and stayed wrong forever once a custom
+ * category was deleted and re-created for the same merchant. Deliberately
+ * excludes status='user_reviewed' (History) — matches
+ * reconcilePendingTransactions()'s own established boundary ("a human
+ * already looked at it, not this pass's place to second-guess it"), and
+ * avoids the same score-staleness risk that put History edit/split on
+ * hold this session pending scores.ts existing. Returns the count so
+ * callers can decide whether to refresh their currently-displayed list.
  */
-export async function saveCustomCategory(input: SaveCustomCategoryInput): Promise<void> {
+export async function saveCustomCategory(input: SaveCustomCategoryInput): Promise<{ retroactivelyUpdated: number }> {
   const userId = await getCurrentUserId();
   const merchantKey = normaliseMerchantKey(input.merchant);
   if (!merchantKey) {
@@ -129,6 +153,28 @@ export async function saveCustomCategory(input: SaveCustomCategoryInput): Promis
       { onConflict: 'user_id,merchant_key' },
     );
   if (error) throw error;
+
+  let retroQuery = supabase
+    .from('transactions')
+    .update({
+      type:          input.type,
+      category:      input.category,
+      sub_category:  input.subCategory,
+      resolved_from: 'custom_category',
+    })
+    .eq('user_id', userId)
+    .eq('merchant_key', merchantKey)
+    .eq('is_deleted', false)
+    .neq('status', 'user_reviewed');
+
+  if (input.excludeTransactionId) {
+    retroQuery = retroQuery.neq('id', input.excludeTransactionId);
+  }
+
+  const { data: retroUpdated, error: retroError } = await retroQuery.select('id');
+  if (retroError) throw retroError;
+
+  return { retroactivelyUpdated: (retroUpdated ?? []).length };
 }
 
 /**
@@ -141,7 +187,11 @@ export async function confirmCustomCategory(
   txnId: string,
   input: SaveCustomCategoryInput,
 ): Promise<void> {
-  await saveCustomCategory(input);
+  // [ADD] Exclude this row from saveCustomCategory()'s own retroactive
+  // update — this function immediately updates it directly below anyway,
+  // so excluding it here just avoids one redundant (harmless but
+  // wasteful) write to the same row.
+  await saveCustomCategory({ ...input, excludeTransactionId: txnId });
 
   const { error } = await supabase.from('transactions')
     .update({

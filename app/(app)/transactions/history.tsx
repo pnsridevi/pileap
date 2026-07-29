@@ -35,6 +35,7 @@
  */
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import { TransactionRow, mapTransactionToRow } from '@/components/transactions/TransactionRow';
 import { ManageMenu } from '@/components/transactions/ManageMenu';
@@ -44,6 +45,7 @@ import { useTransactionStore } from '@/store/transactionStore';
 
 export default function TransactionHistoryScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const {
     transactions: rows,
@@ -66,7 +68,7 @@ export default function TransactionHistoryScreen() {
   // 'history' as a direct argument above instead.
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.topBar}>
         <View style={{ flex: 1 }}>
           <SubTabs

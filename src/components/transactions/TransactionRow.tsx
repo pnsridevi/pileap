@@ -79,6 +79,11 @@ export interface TransactionRowData {
   // don't have either) don't need to fake a value.
   raw_text?: string | null;
   resolved_from?: 'custom_category' | 'registered_fact' | null;
+  // [ADD] Last-4-digits account display, sourced from fetchTransactions()'s
+  // embedded accounts join (see Transaction.accounts in transactions.ts).
+  // Optional — omitted for draft split-child rows and other callers that
+  // never had a real joined Transaction to map from.
+  account_last4?: string | null;
   // [ADD] Needed so qualifiesForRegisteredFact (below) can detect an
   // unresolved NACH-mandate debit without relying on category/sub_category
   // — see smsParser.ts's classify() and the change log there for why that
@@ -115,6 +120,13 @@ export function mapTransactionToRow(txn: Transaction): TransactionRowData {
     raw_text: txn.raw_text,
     resolved_from: txn.resolved_from,
     parse_failure: txn.parse_failure,
+    // [ADD] account_number_masked is already stored masked (e.g.
+    // "XXXX1234" or similar bank-format masking) — just take it as-is
+    // rather than re-deriving from a full number we never have. Null for
+    // the Cash account (account_number_masked is null by design there,
+    // see accounts.ts's resolveCashAccountId()) and for any transaction
+    // whose account_id itself is null (arch doc Table 23 edge cases).
+    account_last4: txn.accounts?.account_number_masked ?? null,
   };
 }
 
@@ -441,6 +453,17 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
             {txn.sub_category ? (
               <Text style={styles.subCategory} numberOfLines={1}>
                 {' · '}{txn.sub_category}
+              </Text>
+            ) : null}
+            {/* [ADD] Last-4 account display, per request — helps
+                distinguish which of several accounts a transaction came
+                from at a glance in the Feed/History list, without opening
+                the row. Omitted entirely (not even a placeholder) when
+                null — e.g. Cash transactions, or a still-unresolved
+                account — rather than showing an empty " · " separator. */}
+            {txn.account_last4 ? (
+              <Text style={styles.metaTag} numberOfLines={1}>
+                {' · '}{txn.account_last4}
               </Text>
             ) : null}
           </View>

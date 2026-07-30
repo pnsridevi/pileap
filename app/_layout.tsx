@@ -31,7 +31,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (isLoading) return;
-    router.replace(isLoggedIn ? '/(app)/report-card' : '/(auth)/sign-in');
+    // [CHANGE — temporary, per testing request] Landing tab changed from
+    // Report Card to Transactions, since Report Card/Modules/Goals are
+    // hidden from the tab bar for now (see app/(app)/_layout.tsx).
+    router.replace(isLoggedIn ? '/(app)/transactions' : '/(auth)/sign-in');
   }, [isLoading, isLoggedIn]);
 
   if (isLoading) {

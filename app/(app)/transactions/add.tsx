@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/Input';
 import { insertManualTransaction } from '@/lib/api/transactions';
 import { saveCustomCategory } from '@/lib/api/customCategories';
 import { fetchAccounts, resolveCashAccountId, type Account } from '@/lib/api/accounts';
+import { fetchUserCategories, saveUserCategory, mergeUserCategoriesIntoTaxonomy, type UserCategoryRow } from '@/lib/api/userCategories';
 
 function todayIso(): string {
   const d = new Date();
@@ -50,6 +51,19 @@ export default function AddTransactionScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [accountId, setAccountId] = useState<string | null>(null);
+
+  // [ADD] user_categories — every category/subcategory this user has ever
+  // typed via "+ Add new," across any merchant. Merged into TAXONOMY below
+  // via mergeUserCategoriesIntoTaxonomy() so previously-typed categories
+  // show up as chips again here, not just at the merchant they were
+  // originally typed for.
+  const [userCategories, setUserCategories] = useState<UserCategoryRow[]>([]);
+
+  useEffect(() => {
+    fetchUserCategories().then(setUserCategories).catch((e) => {
+      console.error('Failed to load user categories:', e);
+    });
+  }, []);
 
   const [txnDate, setTxnDate] = useState(todayIso());
   const [amountText, setAmountText] = useState('');
@@ -85,7 +99,10 @@ export default function AddTransactionScreen() {
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
-  const categoryDefs = TAXONOMY[type] ?? [];
+  // [CHANGE] Was `TAXONOMY[type] ?? []` directly. Now merges in this
+  // user's saved user_categories for the current type — see
+  // mergeUserCategoriesIntoTaxonomy()'s docblock in userCategories.ts.
+  const categoryDefs = mergeUserCategoriesIntoTaxonomy(TAXONOMY[type] ?? [], userCategories, type);
   const activeCategoryDef = categoryDefs.find((c) => c.category === category);
   const subCategoryOptions = activeCategoryDef?.subCategories ?? [];
   const isCustomCategory = category !== '' && !activeCategoryDef;
@@ -120,15 +137,33 @@ export default function AddTransactionScreen() {
     setNewCategoryText('');
     setAddingCategory(false);
     setFormError(null);
+
+    // [ADD] Persist so this category is a selectable chip for any future
+    // merchant/transaction, not just this one. sub_category saved as null
+    // here (not `trimmed`, despite the form's own subCategory state above
+    // reusing the same string as a convenience default) — no actual
+    // subcategory was specified via this control, only a category name.
+    // Fire-and-forget: failing to persist shouldn't block using the
+    // category for THIS transaction, only future reuse.
+    saveUserCategory(type, trimmed, null)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type, category: trimmed, sub_category: null }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   const handleAddSubCategory = () => {
     const trimmed = newSubCategoryText.trim();
-    if (!trimmed) return;
+    if (!trimmed || !category) return;
     setSubCategory(trimmed);
     setNewSubCategoryText('');
     setAddingSubCategory(false);
     setFormError(null);
+
+    // [ADD] Same reasoning as handleAddCategory above — persist under the
+    // CURRENT category so it's a selectable subcategory chip next time,
+    // for any merchant.
+    saveUserCategory(type, category, trimmed)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + category + '-' + trimmed, type, category, sub_category: trimmed }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   const handleSubmit = async () => {

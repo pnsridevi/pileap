@@ -1212,9 +1212,16 @@ export async function fetchTransactions(filters: TransactionFilters = {}) {
   const { status, statuses, category, page = 0, pageSize = 20 } = filters;
   const userId = await getCurrentUserId();
 
+  // [ADD] Embeds the related `accounts` row (via the account_id FK) in the
+  // same query, rather than a separate fetchAccounts() call merged
+  // client-side. This is a single Postgres-side join — still one network
+  // round trip, and `accounts` is a tiny per-user table (a handful of rows
+  // at most), so this adds negligible cost even at pageSize=20. Only the
+  // two fields the UI actually needs (last-4 display) are selected, not
+  // the full accounts row.
   let query = supabase
     .from('transactions')
-    .select('*', { count: 'exact' })
+    .select('*, accounts(account_number_masked, institution_name)', { count: 'exact' })
     .eq('user_id', userId)
     .eq('is_deleted', false)
     // [ADD] Exclude declined-transaction placeholders (buildDiscarded in
@@ -1273,6 +1280,13 @@ export interface Transaction {
   id: string;
   user_id: string;
   account_id: string | null;
+  // [ADD] Populated only by fetchTransactions()'s embedded accounts join
+  // above — null for any Transaction obtained another way (e.g.
+  // insertManualTransaction()'s return value, which only selects `id`).
+  // Kept as a nested object matching Supabase's embed shape 1:1, rather
+  // than flattened onto the top level, so it's visually obvious at every
+  // call site that this came from a join, not a real transactions column.
+  accounts: { account_number_masked: string | null; institution_name: string | null } | null;
   txn_date: string;
   // [FIX] Was `number` — wrong. insertTransaction() writes `amount: txn.amount`
   // straight from ParsedTransaction, which is `number | null` (buildDiscarded/

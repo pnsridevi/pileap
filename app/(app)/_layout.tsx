@@ -1,13 +1,16 @@
 /**
  * app/(app)/_layout.tsx
  *
- * [CHANGE — temporary, per testing request] All tabs except Transactions
- * commented out (not deleted) below, and a Test SMS tab added, so testing
- * can focus on Transactions + the SMS test harness without other
- * unfinished tabs (Report Card, Modules, Goals, Profile — several of
- * which are still stub screens per this session's earlier file reviews)
- * in the way. Uncomment the Tabs.Screen entries below to restore the full
- * tab bar once testing is done — nothing was removed, just commented out.
+ * [CHANGE — temporary, per testing request] Report Card, Modules, and
+ * Goals tabs are hidden from the tab bar for now via `options.href: null`.
+ * This is the correct Expo Router way to hide a tab: commenting out the
+ * <Tabs.Screen> entry does NOT work, because the tab bar is generated
+ * from every file present in app/(app)/ regardless of what's declared
+ * here — the entry only customizes icon/title/order IF the route shows.
+ * `href: null` explicitly excludes it from the tab bar while keeping the
+ * route and screen fully intact (so any internal links to it still work).
+ * To restore these tabs later, just remove the `href: null` line from
+ * each entry below.
  */
 import { Tabs } from 'expo-router';
 import { colors } from '@/constants/theme';
@@ -79,7 +82,7 @@ function TestSmsIcon({ color }: { color: string }) {
 }
 
 export default function AppLayout() {
-  const insets = useSafeAreaInsets(); 
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
@@ -102,7 +105,8 @@ export default function AppLayout() {
     >
       {/* [ADD] Test SMS tab — temporary, for easy access during testing.
           [ORDER — per request] Test SMS first, then Transactions, then
-          Profile. */}
+          Profile. Report Card / Modules / Goals are hidden below via
+          href: null but remain first in file order per original file. */}
       <Tabs.Screen
         name="test-sms"
         options={{
@@ -110,10 +114,13 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <TestSmsIcon color={color} />,
         }}
       />
-      {/* [COMMENTED OUT — temporary, testing request] Uncomment to restore.
+      {/* [HIDDEN — temporary, testing request] href: null removes this
+          from the tab bar while keeping the route/screen fully working.
+          Remove the href line to restore it to the tab bar. */}
       <Tabs.Screen
         name="report-card"
         options={{
+          href: null,
           title: 'Report Card',
           tabBarIcon: ({ color }) => <ReportCardIcon color={color} />,
         }}
@@ -121,11 +128,11 @@ export default function AppLayout() {
       <Tabs.Screen
         name="modules"
         options={{
+          href: null,
           title: 'Modules',
           tabBarIcon: ({ color }) => <ModulesIcon color={color} />,
         }}
       />
-      */}
       <Tabs.Screen
         name="transactions"
         options={{
@@ -133,15 +140,14 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <TransactionsIcon color={color} />,
         }}
       />
-      {/*
       <Tabs.Screen
         name="goals"
         options={{
+          href: null,
           title: 'Goals',
           tabBarIcon: ({ color }) => <GoalsIcon color={color} />,
         }}
       />
-      */}
       {/* [KEPT — per request] Profile has the sign-out option, needed
           during testing even though other tabs are hidden. */}
       <Tabs.Screen

@@ -34,13 +34,14 @@
  * category/sub-category stay as custom chips — same reasoning as
  * EditModal.tsx.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import type { Transaction, TransactionSplit, SplitLineInput } from '@/lib/api/transactions';
 import { TAXONOMY, TxnType, signedAmount } from '@/constants/transactionTaxonomy';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { fetchUserCategories, saveUserCategory, mergeUserCategoriesIntoTaxonomy, type UserCategoryRow } from '@/lib/api/userCategories';
 
 interface DraftLine {
   amountText: string;
@@ -89,6 +90,16 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   // pattern as EditModal.tsx.
   const [formError, setFormError] = useState<string | null>(null);
 
+  // [ADD] user_categories — see userCategories.ts's docblock. Shared
+  // across all lines (it's per-user, not per-line), unlike the per-line
+  // addingCategory/newCategoryText state on DraftLine.
+  const [userCategories, setUserCategories] = useState<UserCategoryRow[]>([]);
+  useEffect(() => {
+    fetchUserCategories().then(setUserCategories).catch((e) => {
+      console.error('Failed to load user categories:', e);
+    });
+  }, []);
+
   // Reset draft lines whenever a new transaction is opened for splitting.
   useMemo(() => {
     if (transaction) {
@@ -121,6 +132,7 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   const handleAddCategory = (idx: number) => {
     const trimmed = lines[idx].newCategoryText.trim();
     if (!trimmed) return;
+    const lineType = lines[idx].type;
     updateLine(idx, {
       category: trimmed,
       subCategory: trimmed,
@@ -128,6 +140,15 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
       addingCategory: false,
     });
     setFormError(null);
+
+    // [ADD] Persist so this category is selectable for any future
+    // merchant/transaction/line, not just this one. sub_category saved as
+    // null (not `trimmed`, despite this line's own subCategory defaulting
+    // to the same string) — no real subcategory was chosen via this
+    // control. Fire-and-forget, same reasoning as EditModal/add.tsx.
+    saveUserCategory(lineType, trimmed, null)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type: lineType, category: trimmed, sub_category: null }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   // [ADD] Confirms a typed subcategory name for one line — works whether
@@ -135,13 +156,20 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   // typed in above.
   const handleAddSubCategory = (idx: number) => {
     const trimmed = lines[idx].newSubCategoryText.trim();
-    if (!trimmed) return;
+    const lineType = lines[idx].type;
+    const lineCategory = lines[idx].category;
+    if (!trimmed || !lineCategory) return;
     updateLine(idx, {
       subCategory: trimmed,
       newSubCategoryText: '',
       addingSubCategory: false,
     });
     setFormError(null);
+
+    // [ADD] Same reasoning as handleAddCategory above.
+    saveUserCategory(lineType, lineCategory, trimmed)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + lineCategory + '-' + trimmed, type: lineType, category: lineCategory, sub_category: trimmed }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   // [FIX] Previously only checked matches/line-count, silently no-opping
@@ -212,7 +240,10 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
             </View>
 
             {lines.map((line, idx) => {
-              const categoryDefs = TAXONOMY[line.type] ?? [];
+              // [CHANGE] Was `TAXONOMY[line.type] ?? []` directly. Merges
+              // in this user's saved user_categories for this line's type
+              // — see mergeUserCategoriesIntoTaxonomy()'s docblock.
+              const categoryDefs = mergeUserCategoriesIntoTaxonomy(TAXONOMY[line.type] ?? [], userCategories, line.type);
               const activeCategoryDef = categoryDefs.find((c) => c.category === line.category);
               const subOptions = activeCategoryDef?.subCategories ?? [];
               // [ADD] Same custom-category/subcategory detection as

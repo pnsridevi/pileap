@@ -48,6 +48,7 @@ import type { Transaction, TransactionEdit } from '@/lib/api/transactions';
 import { TAXONOMY, TxnType, signedAmount } from '@/constants/transactionTaxonomy';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { fetchUserCategories, saveUserCategory, mergeUserCategoriesIntoTaxonomy, type UserCategoryRow } from '@/lib/api/userCategories';
 
 interface Props {
   visible: boolean;
@@ -84,6 +85,16 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
   // replaces the previous silent no-op on an invalid save (see the old
   // "TODO: surface inline validation error" on handleSave below).
   const [formError, setFormError] = useState<string | null>(null);
+
+  // [ADD] user_categories — see userCategories.ts's docblock. Loaded once
+  // (not per-transaction) since this list is per-user, not per-row —
+  // deliberately outside the transaction-keyed effect below.
+  const [userCategories, setUserCategories] = useState<UserCategoryRow[]>([]);
+  useEffect(() => {
+    fetchUserCategories().then(setUserCategories).catch((e) => {
+      console.error('Failed to load user categories:', e);
+    });
+  }, []);
 
   useEffect(() => {
     if (!transaction) return;
@@ -126,7 +137,10 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
 
   if (!transaction) return null;
 
-  const categoryDefs = TAXONOMY[type] ?? [];
+  // [CHANGE] Was `TAXONOMY[type] ?? []` directly. Merges in this user's
+  // saved user_categories for the current type — see
+  // mergeUserCategoriesIntoTaxonomy()'s docblock in userCategories.ts.
+  const categoryDefs = mergeUserCategoriesIntoTaxonomy(TAXONOMY[type] ?? [], userCategories, type);
   const activeCategoryDef = categoryDefs.find((c) => c.category === category);
   const subCategoryOptions = activeCategoryDef?.subCategories ?? [];
   // [ADD] True when the currently-selected category isn't one of this
@@ -178,6 +192,16 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
     setNewCategoryText('');
     setAddingCategory(false);
     setFormError(null);
+
+    // [ADD] Persist so this category is a selectable chip for any future
+    // merchant/transaction, not just this one. sub_category saved as null
+    // (not `trimmed`, despite this form's own subCategory state above
+    // defaulting to the same string) — no real subcategory was chosen via
+    // this control. Fire-and-forget: a failed save here shouldn't block
+    // using the category for THIS edit, only future reuse.
+    saveUserCategory(type, trimmed, null)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type, category: trimmed, sub_category: null }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   // [ADD] Confirms a typed subcategory name — works whether the parent
@@ -185,11 +209,17 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
   const handleAddSubCategory = () => {
     // [ADD] Same null/empty guard as handleAddCategory above.
     const trimmed = newSubCategoryText.trim();
-    if (!trimmed) return;
+    if (!trimmed || !category) return;
     setSubCategory(trimmed);
     setNewSubCategoryText('');
     setAddingSubCategory(false);
     setFormError(null);
+
+    // [ADD] Same reasoning as handleAddCategory above — persist under the
+    // CURRENT category so it's selectable next time, for any merchant.
+    saveUserCategory(type, category, trimmed)
+      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + category + '-' + trimmed, type, category, sub_category: trimmed }]))
+      .catch((e) => console.error('Failed to save user category:', e));
   };
 
   // [FIX] Previously only validated amount, silently no-opping on an empty

@@ -444,6 +444,12 @@ const BANK_MAP: Record<string, string> = {
   'AU BANK':    'AU Small Finance Bank',
   'AUBANK':     'AU Small Finance Bank',
   'BANDHAN':    'Bandhan Bank',
+  // [ADD] American Express — issues cards directly, not through an agent
+  // bank, so it was entirely absent from this map. Same gap fixed in
+  // ruleset.js's BANK_TOKENS (extractBank()) — this map is the separate
+  // lookup used elsewhere in this file.
+  'AMEX':              'American Express',
+  'AMERICAN EXPRESS':  'American Express',
 };
 
 // ─── UPI VPA domain → bank/wallet ────────────────────────────────────────────
@@ -1097,6 +1103,15 @@ const TAXONOMY: TaxonomyEntry[] = [
       /\baditya\s*birla\s*sun\s*life\s*mf\b/i, /\babsl\s*mf\b/i,
       /\bparag\s*parikh\b/i, /\bquant\s*mutual\s*fund\b/i, /\bquant\s*mf\b/i,
       /\bkuvera\b/i, /\bet\s*money\b/i, /\bzerodha\s*coin\b/i,
+      // [ADD] Real gap found via user data: "PPFAS" is Parag Parikh
+      // Financial Advisory Services' own abbreviation, used directly in
+      // real bank SMS ("Bill payment... for PPFAS Mutual Fund...") — the
+      // existing /\bparag\s*parikh\b/i pattern above doesn't cover this
+      // alias, so it was falling through to pending_review despite Parag
+      // Parikh already being a recognized AMC. Two genuinely new AMCs also
+      // added: Tata Mutual Fund and PGIM India — both confirmed real,
+      // recurring SIP debits in real data with no existing pattern.
+      /\bppfas\b/i, /\btata\s*mutual\s*fund\b/i, /\bpgim\s*india\b/i,
     ] },
 
   // [ADD — this pass, found via corpus test] Lump-sum Mutual Fund purchase

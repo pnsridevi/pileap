@@ -131,10 +131,8 @@ async function getCurrentUserId(): Promise<string> {
   return user.id;
 }
 
-// Sentinel used to identify the one placeholder "Unknown" account per user,
-// distinct from any real bank/CC account number. Kept short/fixed so the
-// lookup below is a plain equality check, not a fuzzy match.
-const UNKNOWN_ACCOUNT_SENTINEL = 'UNKNOWN';
+// [REMOVED] UNKNOWN_ACCOUNT_SENTINEL — was only used by
+// resolveUnknownAccountId(), also removed. See that removal's comment.
 
 // ─── Account resolution ───────────────────────────────────────────────────────
 
@@ -177,35 +175,26 @@ async function resolveAccountId(
   return created.id;
 }
 
-async function resolveUnknownAccountId(userId: string): Promise<string> {
-  const { data: existing, error: lookupError } = await supabase
-    .from('accounts')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('account_number_masked', UNKNOWN_ACCOUNT_SENTINEL)
-    .maybeSingle();
-
-  if (lookupError) throw lookupError;
-  if (existing) return existing.id;
-
-  const { data: created, error: insertError } = await supabase
-    .from('accounts')
-    .insert({
-      user_id: userId,
-      account_type: 'bank',
-      institution_name: 'Unknown',
-      account_number_masked: UNKNOWN_ACCOUNT_SENTINEL,
-      balance_latest: null,
-      balance_updated_at: null,
-      aa_linked: false,
-      is_active: true,
-    })
-    .select('id')
-    .single();
-
-  if (insertError) throw insertError;
-  return created.id;
-}
+// [REMOVED] resolveUnknownAccountId() and the UNKNOWN_ACCOUNT_SENTINEL
+// get-or-create pattern. Previously every SMS with no extractable account
+// number was routed to one shared "Unknown" account row per user — real
+// impact found and fixed this session: findDuplicateCandidate() filters
+// on account_id equality, so two completely unrelated transactions (from
+// two different real bank accounts, both failing extraction) sharing the
+// same date/amount/null-merchant would get flagged as duplicates of each
+// other purely from being collapsed onto the same fake account_id. The
+// fix is to make account_id genuinely nullable instead (see the
+// drop_account_id_not_null migration) — null correctly means "we don't
+// know," rather than a fake shared identity that looks like "we do know,
+// and it's the same account for everyone." differentAccount() in
+// runContraDetection() below already handles null account_id correctly
+// with zero changes needed (see its comment) — this bug only existed
+// because a non-null sentinel was being forced into a field designed to
+// tolerate null. findDuplicateCandidate() below is updated to skip the
+// account-based heuristic entirely when accountId is null, rather than
+// trying to compare nulls (which SQL/PostgREST .eq() can't do reliably —
+// same NULL-comparison class of bug this file already hit once with
+// parse_failure, see fetchTransactions()'s comment on that).
 
 // ─── Balance updates ──────────────────────────────────────────────────────────
 
@@ -320,11 +309,28 @@ interface DuplicateCandidate {
 
 async function findDuplicateCandidate(
   userId: string,
-  accountId: string,
+  accountId: string | null,
   txnDate: string,
   amount: number,
   merchantKey: string | null,
 ): Promise<DuplicateCandidate | null> {
+  // [ADD] When the account is unresolved, skip this heuristic entirely
+  // rather than trying to match it against other null-account rows. Two
+  // reasons: (1) SQL's `= NULL` never matches, even against another NULL,
+  // so a plain .eq('account_id', null) would silently find nothing anyway
+  // — same NULL-comparison gotcha already documented elsewhere in this
+  // file; (2) even a corrected null-to-null comparison would just
+  // recreate the original bug — grouping every unresolved-account
+  // transaction into one matching pool, which is exactly what caused
+  // unrelated same-date/same-amount transactions to get flagged as
+  // duplicates of each other. Real duplicate protection for these rows
+  // still comes from findExistingTransactionForSms()'s exact raw_text
+  // match (exactTextMatchId, checked independently before this function
+  // is ever called) — and every unresolved-account row already forces
+  // pending_review regardless (see the status computation below), so a
+  // human reviews each one anyway.
+  if (!accountId) return null;
+
   const { data: active, error: activeError } = await supabase
     .from('transactions')
     .select('id, ref_number, merchant_key')
@@ -656,6 +662,39 @@ async function findExistingTransactionForSms(
   return data ? data.id : null;
 }
 
+// [NEW] Cheap pre-filter for ingestParsedMessages(), NOT a replacement for
+// findExistingTransactionForSms()'s exact-match check above. That check
+// still runs on every row that passes this filter — this only skips rows
+// that are so old they can't possibly be new, avoiding a DB round-trip per
+// row for the (common, on every re-sync of an overlapping window) case of
+// re-parsing days that were already fully synced.
+//
+// Deliberately >= the latest synced txn_date, not >: a message dated on the
+// same calendar day as the latest synced row may still be genuinely new
+// (e.g. a second purchase made later the same day, after the last sync
+// ran) — SMS carry a date but this function only ever sees the DATE part,
+// not the original time, so "same day" can't be assumed already-covered.
+// Rows on that boundary day still go through the normal exact-match +
+// duplicate-candidate pipeline in insertTransaction(); only strictly-older
+// days are skipped outright here.
+//
+// Scoped to is_deleted=false, matching findExistingTransactionForSms()'s
+// same scoping — a soft-deleted row (e.g. a resolved duplicate) shouldn't
+// count as "already synced" for this purpose either.
+async function getLatestSyncedTxnDate(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('txn_date')
+    .eq('user_id', userId)
+    .eq('is_deleted', false)
+    .order('txn_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? data.txn_date : null;
+}
+
 async function insertTransaction(txn: ParsedTransaction, userId: string): Promise<{ id: string; skipPairing: boolean }> {
   // [CHANGED — this pass] Still checked first, before any other work, but
   // no longer returns early — see findExistingTransactionForSms()'s
@@ -667,27 +706,22 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
     ? await findExistingTransactionForSms(userId, txn.raw_text, txn.txn_date)
     : null;
 
+  // [CHANGE] Previously fell back to resolveUnknownAccountId() (a shared
+  // fake account per user) when no account number was extracted. Now
+  // stays null — see the removal comment above resolveAccountId() for the
+  // real bug this fixes. account_id is genuinely nullable on this table
+  // now (see drop_account_id_not_null migration) — null means "we don't
+  // know," and is handled correctly downstream by both contra detection
+  // (differentAccount(), unchanged) and duplicate detection
+  // (findDuplicateCandidate(), updated below to skip the account-based
+  // check when accountId is null).
   const accountId = txn.account_number_masked
     ? await resolveAccountId(txn.account_number_masked, txn.bank, txn.channel, userId)
-    : await resolveUnknownAccountId(userId);
+    : null;
 
-  // [FIX] resolveAccountId() returns string|null (null only when its own
-  // accountNumberMasked argument is falsy), while resolveUnknownAccountId()
-  // always returns string. TypeScript can't see that this ternary's
-  // resolveAccountId branch only runs when txn.account_number_masked is
-  // truthy — the one case where resolveAccountId is guaranteed non-null —
-  // so accountId's inferred type stays string|null overall, which
-  // findDuplicateCandidate() (below) and the insert payload both need as a
-  // plain string. This guard narrows the type AND is real safety, not just
-  // a type-checker workaround: arch doc Table 23 requires account_id to
-  // never be null, so a thrown error here is the correct behaviour if that
-  // guarantee is ever actually violated, rather than silently inserting a
-  // bad value.
-  if (!accountId) {
-    throw new Error(
-      `resolveAccountId returned null for a truthy account_number_masked ("${txn.account_number_masked}") — this should be unreachable.`
-    );
-  }
+  // [REMOVED] The "accountId must be non-null" guard that used to throw
+  // here — no longer applicable now that null is a valid, expected value
+  // for an unresolved account rather than an unreachable error state.
 
   // [FIX] Previously only checked matched_rule against DEFINITIONAL_CONTRA_RULES
   // — a hand-maintained list in THIS file. But smsParser.ts's ParsedTransaction
@@ -793,11 +827,18 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
       ? computeDuplicateConfidence(txn.ref_number, duplicateCandidate.ref_number, txn.merchant_key, duplicateCandidate.merchant_key)
       : null;
 
-  // Per arch doc Table 23: account_id must not be null; if the parser
-  // couldn't extract a real account number, route to pending_review
-  // regardless of what the parser's own status said. A possible duplicate
-  // ALSO forces pending_review, regardless of what the parser said —
-  // duplicates are never auto-approved, the user always decides.
+  // [CHANGE — this pass] Was: "Per arch doc Table 23: account_id must not
+  // be null" — that constraint has been deliberately overturned this
+  // session (see resolveUnknownAccountId()'s removal comment above); a
+  // missing account number is now represented as account_id: null
+  // directly, not routed to a fake shared account. This line's actual
+  // behavior is unchanged though: an unresolved account still forces
+  // pending_review regardless of what the parser's own status said — that
+  // safety rule was never really about account_id being non-null, it was
+  // about a human needing to look at any row whose facts (which account?)
+  // are uncertain. A possible duplicate ALSO forces pending_review,
+  // regardless of what the parser said — duplicates are never
+  // auto-approved, the user always decides.
   //
   // [FIX — this pass] Definitional contra rows now resolve to 'approved'
   // instead of falling through to txn.status. Previously, a genuine
@@ -966,6 +1007,16 @@ export async function runContraDetection(newTxnId: string, _depth = 0): Promise<
 
   if (activeError) throw activeError;
 
+  // [NOTE — this session] This already handles account_id: null correctly
+  // with zero changes needed: if either side's account_id is null (falsy),
+  // the whole expression short-circuits to `!false` = true, i.e. "treat
+  // as different accounts, eligible for contra matching." That's the
+  // right behavior — an unresolved account can't be proven to be the SAME
+  // account as another transaction, so it shouldn't be excluded from
+  // matching the way two confirmed-identical account_ids would be. This
+  // only broke in practice when a fake shared "Unknown" account_id was
+  // being forced into this field instead of a real null — see
+  // resolveUnknownAccountId()'s removal comment near the top of this file.
   const differentAccount = (c: TxnRow) =>
     !(txn.account_id && c.account_id && txn.account_id === c.account_id);
 
@@ -1123,6 +1174,14 @@ export interface IngestResult {
    * window until Known Gap #1 (no idempotency key) is fixed — that's a
    * real, visible consequence of that gap, not evidence of a new bug. */
   duplicatesFlagged: number;
+  /** [NEW] Count of items skipped outright because their txn_date fell
+   * strictly before the latest already-synced txn_date for this user — see
+   * getLatestSyncedTxnDate()'s comment for why this is a >= cutoff, not a
+   * hard guarantee of no duplicates on the boundary day itself. This is
+   * purely a network-cost optimization; correctness still comes from
+   * insertTransaction()'s per-row exact-match + duplicate-candidate checks
+   * on whatever remains after this filter. */
+  skippedBeforeLastSync: number;
   errors: { raw_sms_id: string; message: string }[];
 }
 
@@ -1143,12 +1202,24 @@ export async function ingestParsedMessages(
     balancesUpdated: 0,
     duplicatesSkipped: 0,
     duplicatesFlagged: 0,
+    skippedBeforeLastSync: 0,
     errors: [],
   };
 
+  // [NEW] Skip re-processing days that are already fully synced. Balance
+  // updates are exempt — applyBalanceUpdate() already self-guards on
+  // update.message_date vs the account's current balance_updated_at, so
+  // there's no cost/correctness reason to filter those here too, and doing
+  // so would risk skipping a legitimate balance refresh.
+  const latestSyncedDate = await getLatestSyncedTxnDate(userId);
+  const itemsToProcess = latestSyncedDate
+    ? items.filter((item) => isBalanceUpdate(item) || item.txn_date >= latestSyncedDate)
+    : items;
+  result.skippedBeforeLastSync = items.length - itemsToProcess.length;
+
   let processed = 0;
 
-  for (const item of items) {
+  for (const item of itemsToProcess) {
     try {
       if (isBalanceUpdate(item)) {
         await applyBalanceUpdate(item, userId);

@@ -10,10 +10,14 @@
  *
  *   - useTransactionFeed's activeTab === 'history' branch already exists
  *     and was exercised (not just written) via that migration.
- *   - transactionStore's categoryFilter is shared across both screens by
- *     design — a category chosen here or on the Active feed carries over
- *     to the other. That's a deliberate consequence of one shared store,
- *     not an oversight; flag if you'd rather each screen keep its own.
+ *   - [REMOVED — this pass] The "All categories" chip (and its
+ *     transactionStore categoryFilter binding) is gone from this screen and
+ *     from Feed's. Neither screen had any control that ever set it to a
+ *     real category — it only ever reset itself to null, which was already
+ *     the permanent default — so it was a non-functional, confusing chip.
+ *     transactionStore's categoryFilter field itself is untouched in case
+ *     something else still reads/sets it; only the dead UI binding here is
+ *     removed.
  *   - No draft workspace, no Edit/Split, no Submit — reviewed rows are a
  *     historical record, not something this screen mutates. TransactionRow
  *     is used with onPress/onSplitPress both omitted (both optional props)
@@ -41,7 +45,6 @@ import { TransactionRow, mapTransactionToRow } from '@/components/transactions/T
 import { ManageMenu } from '@/components/transactions/ManageMenu';
 import { Button } from '@/components/ui/Button';
 import { useTransactionFeed } from '@/hooks/useTransactionFeed';
-import { useTransactionStore } from '@/store/transactionStore';
 
 export default function TransactionHistoryScreen() {
   const router = useRouter();
@@ -59,7 +62,10 @@ export default function TransactionHistoryScreen() {
     refresh,
   } = useTransactionFeed('history');
 
-  const { categoryFilter, setCategoryFilter } = useTransactionStore();
+  // [REMOVED] categoryFilter/setCategoryFilter binding — the "All
+  // categories" chip that used them was always active (nothing in this
+  // screen ever set categoryFilter to a real category), so it was a
+  // no-op control. Removed here rather than left half-wired.
   // [REMOVED] Used to pin the shared transactionStore's activeTab to
   // 'history' here on mount — see useTransactionFeed.ts's docblock for
   // the real bug this caused (it silently redirected Feed's still-
@@ -81,14 +87,6 @@ export default function TransactionHistoryScreen() {
 
       <View style={styles.headerRow}>
         <Text style={styles.headerCount}>{totalCount} reviewed transactions</Text>
-      </View>
-
-      <View style={styles.filterRow}>
-        <FilterChip
-          label="All categories"
-          active={categoryFilter === null}
-          onPress={() => setCategoryFilter(null)}
-        />
       </View>
 
       <FlatList
@@ -157,14 +155,6 @@ function SubTabs({ active, onSwitch }: { active: 'feed' | 'history'; onSwitch: (
   );
 }
 
-function FilterChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity onPress={onPress} style={[chipStyles.chip, active && chipStyles.chipActive]}>
-      <Text style={[chipStyles.text, active && chipStyles.textActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <View style={styles.emptyState}>
@@ -173,20 +163,6 @@ function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
     </View>
   );
 }
-
-const chipStyles = StyleSheet.create({
-  chip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-  },
-  chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
-  text: { fontSize: fontSize.xs, color: colors.mid, fontWeight: fontWeight.medium },
-  textActive: { color: colors.white },
-});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
@@ -222,7 +198,6 @@ const styles = StyleSheet.create({
   subTabTextActive: { color: colors.dark },
   headerRow: { marginBottom: spacing.sm },
   headerCount: { fontSize: fontSize.sm, color: colors.muted },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,

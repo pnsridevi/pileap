@@ -1,16 +1,23 @@
 import { supabase } from './supabase';
 import { useAuthStore } from '@/store/authStore';
 
-// [ADD] Test-only sign-in path — see supabase/functions/test-phone-auth.
-// Gated behind an env flag so switching between test/real auth is a
-// one-line config change, never a code change, minimizing the risk of
-// this accidentally shipping to production.
-export const TEST_AUTH_MODE = process.env.EXPO_PUBLIC_TEST_AUTH_MODE === 'true';
+// [REMOVED] TEST_AUTH_MODE and testSignInWithPhone() — the custom
+// test-phone-auth Edge Function bypass that accepted ANY phone number
+// with a fixed test code. Removed because it was the actual security gap
+// flagged this session: anyone who typed someone else's number could see
+// their transactions, with no real ownership check. Replaced by
+// Supabase's own dashboard test-numbers list (Auth -> Providers -> Phone)
+// combined with the real signInWithOtp()/verifyOtp() pair below — only
+// numbers explicitly added there can request a code at all.
+// The supabase/functions/test-phone-auth Edge Function itself and the
+// EXPO_PUBLIC_TEST_AUTH_MODE / EXPO_PUBLIC_TEST_AUTH_SHARED_SECRET env
+// vars are now unused by the app; left deployed/set for now rather than
+// deleted, in case reverting is ever needed — safe to remove for real
+// once this flow is confirmed stable.
 
-const TEST_AUTH_FUNCTION_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/test-phone-auth`;
-const TEST_AUTH_SHARED_SECRET = process.env.EXPO_PUBLIC_TEST_AUTH_SHARED_SECRET ?? '';
-
-// Step 1 of login: send an OTP (or accept a test number silently) to this phone.
+// Step 1 of login: send a real OTP to this phone. Only succeeds for
+// numbers on the Supabase dashboard's test-numbers list right now (real
+// SMS provider isn't fully live — see the DLT discussion).
 export async function sendOtp(phone: string) {
   return supabase.auth.signInWithOtp({ phone });
 }
@@ -26,40 +33,6 @@ export async function verifyOtpAndSignIn(phone: string, token: string) {
     useAuthStore.getState().setSession(data.session);
   }
   return { data, error };
-}
-
-// [ADD] TEST-ONLY replacement for the sendOtp -> verifyOtpAndSignIn pair
-// above. Skips real SMS entirely: the Edge Function checks the fixed
-// test code, looks up-or-creates the user by phone, and mints a real
-// session via a magiclink-token exchange (see the function's docblock
-// for why). One network round trip does the whole lookup-or-create +
-// sign-in, unlike the real flow's separate send/verify steps.
-export async function testSignInWithPhone(phone: string, otp: string) {
-  try {
-    const res = await fetch(TEST_AUTH_FUNCTION_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-test-auth-secret': TEST_AUTH_SHARED_SECRET,
-      },
-      body: JSON.stringify({ phone, otp }),
-    });
-    const body = await res.json();
-    if (!res.ok) {
-      return { data: { session: null }, error: new Error(body?.error ?? 'Sign-in failed') };
-    }
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      token_hash: body.token,
-      type: 'email',
-    });
-    if (!error && data.session) {
-      useAuthStore.getState().setSession(data.session);
-    }
-    return { data, error };
-  } catch (e) {
-    return { data: { session: null }, error: e instanceof Error ? e : new Error(String(e)) };
-  }
 }
 
 export async function signOut() {

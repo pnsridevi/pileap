@@ -82,8 +82,8 @@ export default function TransactionsFeedScreen() {
   } = useTransactionFeed('active');
 
   const {
-    statusFilter, categoryFilter,
-    setStatusFilter, setCategoryFilter,
+    statusFilter,
+    setStatusFilter,
   } = useTransactionStore();
   // [REMOVED] Used to pin the shared transactionStore's activeTab to
   // 'active' here on mount. That shared value caused a real bug — see
@@ -316,7 +316,6 @@ export default function TransactionsFeedScreen() {
       <View style={styles.filterRow}>
         <FilterChip label="All" active={statusFilter === 'all'} onPress={() => setStatusFilter('all')} />
         <FilterChip label="Needs review" active={statusFilter === 'pending_review'} onPress={() => setStatusFilter('pending_review')} />
-        <FilterChip label="All categories" active={categoryFilter === null} onPress={() => setCategoryFilter(null)} />
       </View>
 
       <View style={styles.banner}>

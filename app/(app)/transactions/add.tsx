@@ -137,17 +137,13 @@ export default function AddTransactionScreen() {
     setNewCategoryText('');
     setAddingCategory(false);
     setFormError(null);
-
-    // [ADD] Persist so this category is a selectable chip for any future
-    // merchant/transaction, not just this one. sub_category saved as null
-    // here (not `trimmed`, despite the form's own subCategory state above
-    // reusing the same string as a convenience default) — no actual
-    // subcategory was specified via this control, only a category name.
-    // Fire-and-forget: failing to persist shouldn't block using the
-    // category for THIS transaction, only future reuse.
-    saveUserCategory(type, trimmed, null)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type, category: trimmed, sub_category: null }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] No longer persists to user_categories here. Was saving
+    // immediately on "Add" with sub_category: null — but if the user then
+    // typed a real subcategory afterward, that created a SECOND row
+    // (category, subCategory) alongside the first stray (category, null)
+    // one, since sub_category is part of the uniqueness key. Persisting is
+    // now deferred to handleSubmit(), once, with whatever final
+    // category/subCategory values actually got submitted — see there.
   };
 
   const handleAddSubCategory = () => {
@@ -157,13 +153,8 @@ export default function AddTransactionScreen() {
     setNewSubCategoryText('');
     setAddingSubCategory(false);
     setFormError(null);
-
-    // [ADD] Same reasoning as handleAddCategory above — persist under the
-    // CURRENT category so it's a selectable subcategory chip next time,
-    // for any merchant.
-    saveUserCategory(type, category, trimmed)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + category + '-' + trimmed, type, category, sub_category: trimmed }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] Same reasoning as handleAddCategory above — no DB write
+    // here, deferred to handleSubmit().
   };
 
   const handleSubmit = async () => {
@@ -198,6 +189,23 @@ export default function AddTransactionScreen() {
           await saveCustomCategory({ merchant, type, category, subCategory: subCategory ?? null, excludeTransactionId: inserted.id });
         } catch (e) {
           console.error('Failed to save custom category preference:', e);
+        }
+      }
+
+      // [ADD] Persist a newly typed category/subcategory to user_categories
+      // now — at actual submit time, not when "+ Add new" was confirmed.
+      // Only one save call, with whatever the FINAL category/subCategory
+      // values are (correctly null if the user only ever typed a category
+      // and no subcategory) — see handleAddCategory/handleAddSubCategory's
+      // comments for why this replaced the old eager-save approach.
+      // isCustomCategory/isCustomSubCategory (computed above from
+      // categoryDefs) tell us whether either value is actually new rather
+      // than picked from an existing chip — no save needed otherwise.
+      if (isCustomCategory || isCustomSubCategory) {
+        try {
+          await saveUserCategory(type, category, subCategory ?? null);
+        } catch (e) {
+          console.error('Failed to save user category:', e);
         }
       }
 

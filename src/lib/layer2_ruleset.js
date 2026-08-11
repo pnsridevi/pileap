@@ -95,6 +95,11 @@ const BANK_TOKENS = [
   { token: 'tmb',  name: 'Tamilnad Mercantile Bank' },
   { token: 'cub',  name: 'City Union Bank' },
   { token: 'sib',  name: 'South Indian Bank' },
+  // [ADD] American Express — issues cards directly, not through an agent
+  // bank, so it was entirely absent from this list. Confirmed real gap:
+  // 20/20 Amex transactions in one user's data had institution_name blank.
+  { token: 'americanexpress', name: 'American Express' },
+  { token: 'amex',            name: 'American Express' },
 ];
 
 // [FIX] VPA-hijack — a counterparty's UPI handle (e.g. "divya.iyer@okhdfcbank")
@@ -145,6 +150,16 @@ function extractChannel(body) {
   // [ADD] CC spend — "Txn Rs.\nOn HDFC Bank Card" or "Spent Rs. On HDFC Bank Card"
   // Must be before generic Card check — these are explicitly credit card spends.
   if (/(?:Txn\s+Rs\.|Spent\s+Rs\.)\s*[\d,]+.*On\s+(?:HDFC|ICICI|SBI|Axis|Kotak|Yes|IndusInd|RBL|IDFC|Federal)\s+Bank\s+Card/is.test(body)) {
+    return 'Credit Card';
+  }
+
+  // [ADD] Amex's own phrasing ("You've spent $X on your AMEX card **
+  // NNNNN at MERCHANT...") never matches the "On <Bank> Bank Card"
+  // CC-spend check above, so it was falling to the generic 'Card' check
+  // below — which meant resolveAccountId() always defaulted it to
+  // account_type: 'bank' instead of 'credit_card'. Must come before the
+  // generic Card check so Amex spends get tagged Credit Card correctly.
+  if (/\bon your\s+AMEX\s+card\b/i.test(body)) {
     return 'Credit Card';
   }
 
@@ -219,6 +234,15 @@ function extractAmount(body) {
     }
   }
 
+  // [ADD] No-space "INR2.00" variant (RBL credit card format) — the
+  // existing INR pattern below requires \s+ (at least one space) and was
+  // returning null for this real message: "INR2.00 spent at GOOGLE ADS
+  // on RBL Bank credit card (7450)...". Added as an earlier, separate
+  // check rather than editing the existing \s+ pattern below, so nothing
+  // already working is touched.
+  const inrNoSpace = body.match(/\bINR([\d,]+(?:\.\d{1,2})?)/i);
+  if (inrNoSpace) { const v = parseFloat(inrNoSpace[1].replace(/,/g, '')); if (v > 0) return v; }
+
   const inr = body.match(/INR\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (inr) { const v = parseFloat(inr[1].replace(/,/g, '')); if (v > 0) return v; }
 
@@ -235,6 +259,14 @@ function extractAmount(body) {
   // Lanka trip forex card spends). Must come before the final null return.
   const fx = body.match(/\b(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (fx) { const v = parseFloat(fx[1].replace(/,/g, '')); if (v > 0) return v; }
+
+  // [ADD] $-symbol amounts (e.g. Amex USD card alerts: "You've spent
+  // $10.16 on your AMEX card..."). Confirmed real gap: 4/4 of these in one
+  // user's data had amount come back null (parse_failure: missing_amount)
+  // even though merchant/date extracted fine — only the $ symbol itself
+  // was unhandled, unlike the 3-letter currency codes above.
+  const usdSymbol = body.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/);
+  if (usdSymbol) { const v = parseFloat(usdSymbol[1].replace(/,/g, '')); if (v > 0) return v; }
 
   const bare = body.match(/transaction of\s+([\d,]+(?:\.\d{1,2})?)/i);
   if (bare) { const v = parseFloat(bare[1].replace(/,/g, '')); if (v > 0) return v; }
@@ -321,6 +353,15 @@ function extractAccount(body) {
   m = body.match(/(?:account|card)\s+[X*]{0,4}(\d{4})\b/i);
   if (m) return m[1];
 
+  // [ADD] Amex-style "card ** 21009" — asterisks separated from the digits
+  // by a space, and often 5 digits rather than 4 (unlike every other
+  // pattern above, which require the digits directly adjacent to the mask
+  // characters). Confirmed real gap: every Amex SMS in one user's data had
+  // account_number_masked come back null, so resolveAccountId() never even
+  // ran for them (it early-returns on a null account number).
+  m = body.match(/card\s+\*{1,4}\s*(\d{4,6})\b/i);
+  if (m) return m[1];
+
   return null;
 }
 
@@ -361,6 +402,18 @@ function extractMerchant(body) {
   m = body.match(/X+\d+-TPT-.{2,40}?-([A-Z][A-Z .]{2,40}?)(?:\.|\s*$)/i);
   if (m) return m[1].trim();
 
+  // [ADD] "UPI/P2A/<ref>/<NAME>" or "UPI/P2M/<ref>/<NAME>" — the payee/
+  // payer name for person-to-person and person-to-merchant UPI transfers
+  // (Axis Bank format seen in real data: "UPI/P2A/620920585592/ANITHA S").
+  // Placed BEFORE the "To " pattern below — that pattern is case-
+  // insensitive and was incorrectly matching the lowercase "to" inside
+  // "SMS BLOCKUPI Cust ID to 919951860002" further down the same message,
+  // capturing the phone number as the merchant instead of the real name
+  // sitting right here. Confirmed real gap: 17/17 P2A messages in one
+  // user's data had merchant set to that trailing phone number.
+  m = body.match(/\bUPI\/(?:P2A|P2M)\/\d+\/([A-Za-z][A-Za-z0-9 .'-]{1,40}?)(?:\s*\n|\s+Not\s+you|\s+Cust\s+ID|$)/i);
+  if (m) return m[1].trim();
+
   // "To MERCHANT\n" or "To MERCHANT On" — HDFC UPI standard format
   // [FIX] Added "successful"/"from A/c" as additional stop tokens — messages
   // like "Fee payment of Rs.X to BITS Pilani successful from A/c XX1354 on..."
@@ -375,7 +428,24 @@ function extractMerchant(body) {
     const candidate = m[1].trim();
     // [ADD] Null guard: raw IB Funds Transfer label leaking as merchant
     if (/^IB\s+(SS\s+)?FUNDS\s+TRANSFER/i.test(candidate)) return null;
-    return candidate;
+    // [ADD] "credited/debited to A/c..." / "to <Bank> a/c..." / "to
+    // beneficiary NAME, A/c..." is a destination account reference, not a
+    // merchant name. Confirmed real gap: the "To " pattern above is
+    // case-insensitive, so it was also matching the lowercase "to" inside
+    // "credited to A/c no. XX5668 on..." (NEFT credit SMS), capturing
+    // "A/c no. XX5668" / "RBL Bank a/c xx3595" / "beneficiary Revive
+    // Corpo, A/c no. XX7647" as if it were "To MERCHANT On DATE". Every
+    // real case seen contains the literal "A/c" token somewhere in the
+    // captured span, so checking for that (rather than requiring it at
+    // the very start) catches all three phrasings.
+    // Deliberately does NOT return here (unlike the IB Funds Transfer
+    // guard above) — falls through instead, so the NEFT-ref-line and
+    // "credited to beneficiary" patterns further below get a chance to
+    // recover the real name from elsewhere in the same message. 36/36
+    // NEFT rows in one user's data hit this exact false match.
+    if (!/\bA\/c\b/i.test(candidate)) {
+      return candidate;
+    }
   }
 
   // "At MERCHANT On" — card/ATM spend
@@ -407,6 +477,27 @@ function extractMerchant(body) {
     if (/^IB\s+(SS\s+)?FUNDS\s+TRANSFER/i.test(candidate)) return null;
     return candidate;
   }
+
+  // [ADD] "Info - NEFT/REF/NAME." or "Ref -NEFT/REF/NAME/BANKCODE/NNN)" —
+  // the sender/beneficiary name embedded in a NEFT reference line, once
+  // the guard above correctly stops the "To " pattern from grabbing the
+  // destination account text instead. Confirmed against real data:
+  // "...Info - NEFT/HDFCH01156865529/MENA. Chk Bal..." and
+  // "...(Ref -NEFT/KKBK262125888979/ACALPO PTE LTD/KKBK/000958)...".
+  m = body.match(/(?:Info|Ref)\s*-\s*NEFT\/[A-Z0-9]+\/([A-Z][A-Z .]{2,40}?)(?:\/|\.|\)|\s*$)/i);
+  if (m) return m[1].trim();
+
+  // [ADD] "credited to beneficiary NAME, A/c..." — a third real NEFT
+  // credit phrasing seen in the corpus, distinct from both patterns above.
+  m = body.match(/credited to beneficiary\s+([A-Z][A-Za-z .]{2,40}?),/i);
+  if (m) return m[1].trim();
+
+  // [ADD] "@UPI_<merchant> DD-MM-YYYY" — Yes Bank's card-linked UPI spend
+  // format ("...YES BANK Card X1879 @UPI_BLINKIT 31-07-2026..."). Was
+  // entirely uncaptured — no existing pattern above matches this shape at
+  // all, so merchant came back null on 8/8 of these in one user's data.
+  m = body.match(/@UPI_([A-Za-z0-9][A-Za-z0-9 .]{1,40}?)\s+\d{1,2}-\d{1,2}-\d{4}/i);
+  if (m) return m[1].trim();
 
   return null;
 }
@@ -653,6 +744,20 @@ const RULES = [
         if (/\bno\s+(?:money|amount)\s+(?:has\s+been\s+)?(?:deducted|debited)\b|\bamount\s+not\s+debited\b|\bnot\s+been\s+debited\b/i.test(body)) {
           return true;
         }
+        // [REVERTED — see change log] An earlier pass added a broader
+        // check here for "rejected"/"unsuccessful"/"insufficient
+        // balance|funds", none confirmed in the real corpus at the time.
+        // Confirmed unsafe on real data: a Tata Capital loan-mandate SMS
+        // ("Additional charges will be applicable if the debit is
+        // unsuccessful") is a conditional clause about a FUTURE
+        // possibility, not a report of an actual decline — "unsuccessful"
+        // alone false-positived this message straight to discard, losing
+        // a real ₹672 mandate transaction entirely. Reverted rather than
+        // guarded, since "rejected"/"insufficient balance" carry the same
+        // risk (e.g. "you will be charged if payment is rejected") without
+        // a single confirmed real example to build a safe, specific guard
+        // against. Left as a documented idea, not shipped, until real
+        // decline SMS using this wording are actually seen.
         return /declined|txn.*fail|transaction.*fail|payment.*fail|could\s+not\s+be\s+processed/im.test(body);
       }
     },
@@ -1100,6 +1205,42 @@ const RULES = [
         account_number_masked: extractAccount(body),
         txn_date:              extractDate(body),
         merchant:              extractMerchant(body),
+        balance:               extractBalance(body),
+        ...extractRefNumber(body),
+        possible_contra:       false,
+        confidence:            0.85,
+      };
+    },
+  },
+
+  // ── 9b. MUTUAL FUND SIP / MANDATE BILL NOTIFICATION ─────────────────────────
+  // [ADD] "Bill payment of INR 1000.00 for Tata Mutual Fund TAMLSIPD-006369
+  // is scheduled for 16-08-2026..." and "Processed payment of INR 5000.00
+  // for XXALZPV0678H with ref no. ..." — Axis Bank's own SIP/mandate debit
+  // notification templates. Neither phrasing contains debited/spent/NACH/
+  // UMRN/mandate, so both fell through every existing rule and escalated
+  // to Haiku on every occurrence. Confirmed real gap: 7/9 of one user's
+  // Haiku-escalations were this exact template, just different fund names.
+  // Structural match only (verb + "payment of [amount] for [entity]") —
+  // not keyed to Axis Bank or any specific fund name, so it generalizes to
+  // any bank using this phrasing. channel: 'NACH' so this also qualifies
+  // for the isRecurringMandate duplicate-detection exemption and
+  // registered_facts resolution in transactions.ts, same as GENERIC_NACH
+  // above. Must come before GENERIC_DEBIT/GENERIC_CREDIT (though neither
+  // of those would match this phrasing anyway, since it contains no
+  // debited/credited-family keyword).
+  {
+    id: 'MUTUAL_FUND_SIP_BILL',
+    pattern: /\b(?:Bill payment|Processed payment)\s+of\s+(?:INR|Rs\.?)\s*[\d,]+(?:\.\d{1,2})?\s+for\s+.+/i,
+    extract(body, messageDate) {
+      const nameMatch = body.match(/\b(?:Bill payment|Processed payment)\s+of\s+(?:INR|Rs\.?)\s*[\d,]+(?:\.\d{1,2})?\s+for\s+(.+?)(?:\s+is\s+scheduled\s+for|\s+with\s+ref\s+no\.|\.|$)/i);
+      return {
+        amount:                extractAmount(body),
+        bank:                  extractBank(body),
+        channel:               'NACH',
+        account_number_masked: extractAccount(body),
+        txn_date:              extractDate(body) || messageDate,
+        merchant:              nameMatch ? nameMatch[1].trim() : null,
         balance:               extractBalance(body),
         ...extractRefNumber(body),
         possible_contra:       false,

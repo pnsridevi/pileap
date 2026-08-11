@@ -192,16 +192,14 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
     setNewCategoryText('');
     setAddingCategory(false);
     setFormError(null);
-
-    // [ADD] Persist so this category is a selectable chip for any future
-    // merchant/transaction, not just this one. sub_category saved as null
-    // (not `trimmed`, despite this form's own subCategory state above
-    // defaulting to the same string) — no real subcategory was chosen via
-    // this control. Fire-and-forget: a failed save here shouldn't block
-    // using the category for THIS edit, only future reuse.
-    saveUserCategory(type, trimmed, null)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type, category: trimmed, sub_category: null }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] No longer persists to user_categories here — was saving
+    // immediately on "Add", which created a stray (category, null) row
+    // even when the user went on to type a real subcategory right after
+    // (a second, separate row, since sub_category is part of the
+    // uniqueness key). Deferred to handleSave() below, which now passes
+    // the final category/subCategory to the parent via onSave()'s new
+    // third argument — same "nothing written until Submit" timing this
+    // modal already uses for the transaction edit itself.
   };
 
   // [ADD] Confirms a typed subcategory name — works whether the parent
@@ -214,12 +212,7 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
     setNewSubCategoryText('');
     setAddingSubCategory(false);
     setFormError(null);
-
-    // [ADD] Same reasoning as handleAddCategory above — persist under the
-    // CURRENT category so it's selectable next time, for any merchant.
-    saveUserCategory(type, category, trimmed)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + category + '-' + trimmed, type, category, sub_category: trimmed }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] Same reasoning as handleAddCategory above — no DB write here.
   };
 
   // [FIX] Previously only validated amount, silently no-opping on an empty
@@ -238,6 +231,23 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
       return;
     }
     setFormError(null);
+
+    // [ADD] Persist a newly typed category/subcategory to user_categories
+    // now — at the moment "Save Changes" is actually tapped, not earlier
+    // when "+ Add new" was confirmed (see handleAddCategory/
+    // handleAddSubCategory's comments for why that was wrong: it created
+    // a stray (category, null) row whenever a subcategory was typed
+    // afterward). One save call, with whatever the FINAL category/
+    // subCategory values are — correctly null if only a category was
+    // typed and no subcategory. isCustomCategory/isCustomSubCategory
+    // (computed above from categoryDefs) tell us whether either value is
+    // actually new rather than picked from an existing chip. Fire-and-
+    // forget: a failed save here shouldn't block the edit itself, only
+    // future reuse of the category as a chip.
+    if (isCustomCategory || isCustomSubCategory) {
+      saveUserCategory(type, category, subCategory ?? null)
+        .catch((e) => console.error('Failed to save user category:', e));
+    }
 
     const edit: TransactionEdit = {
       id: transaction.id,

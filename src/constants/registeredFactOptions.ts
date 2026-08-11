@@ -103,6 +103,14 @@ export const SIP_PLATFORMS: string[] = [
   'UTI MF', 'Kotak MF', 'Mirae Asset', 'Franklin Templeton', 'DSP',
   'Aditya Birla Sun Life MF', 'Parag Parikh', 'Quant MF',
   'Kuvera', 'ET Money', 'Zerodha Coin',
+  // [ADD] Mirrors smsParser.ts's TAXONOMY additions — kept in sync per
+  // this file's own docblock requirement. 'PPFAS' shown as its own label
+  // since that's the abbreviation real bank SMS actually use, even though
+  // it's the same AMC as 'Parag Parikh' above (Parag Parikh Financial
+  // Advisory Services) — both entries route to the same underlying
+  // category, listed separately here only so the dropdown matches what a
+  // user will recognize from their own SMS.
+  'Tata Mutual Fund', 'PGIM India', 'PPFAS',
 ];
 
 export interface InsuranceTypeOption {

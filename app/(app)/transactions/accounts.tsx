@@ -1,11 +1,15 @@
 import {
-  View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Rect, Polyline } from 'react-native-svg';
 import { useCallback, useEffect, useState } from 'react';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
-import { fetchAccounts, resolveCashAccountId, setAccountActive, type Account } from '@/lib/api/accounts';
+// [CHANGE] setAccountActive no longer imported — the track/untrack toggle
+// is removed for now (see AccountsTab below). The function itself is left
+// in place in accounts.ts, unused, so re-adding a toggle later doesn't
+// need the backend piece rebuilt.
+import { fetchAccounts, resolveCashAccountId, type Account } from '@/lib/api/accounts';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +81,6 @@ const SHOW_DATA_SOURCE_CARDS = false;
 export default function AccountsTab() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
 
   const loadAccounts = useCallback(async () => {
@@ -99,18 +102,8 @@ export default function AccountsTab() {
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
-  const handleToggle = async (account: Account, next: boolean) => {
-    setBusyId(account.id);
-    setAccounts((prev) => prev.map((a) => (a.id === account.id ? { ...a, is_active: next } : a)));
-    try {
-      await setAccountActive(account.id, next);
-    } catch (e) {
-      setAccounts((prev) => prev.map((a) => (a.id === account.id ? { ...a, is_active: !next } : a)));
-      setAccountsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  };
+  // [REMOVED] handleToggle() — was wired to the per-account Switch below,
+  // which is also removed for now (see the "Your Accounts" section render).
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -212,11 +205,12 @@ export default function AccountsTab() {
       </>
       )}
 
-      {/* ── [ADD] Your Accounts — track/untrack, added this session ── */}
+      {/* ── [CHANGE] Your Accounts — now display-only, no track/untrack
+          toggle for now (removed per request). Was: "Turn an account off
+          if you don't want its future transactions tracked..." */}
       <Text style={[s.sectionLabel, { marginTop: spacing.lg }]}>Your Accounts</Text>
       <Text style={s.sectionSub}>
-        Turn an account off if you don't want its future transactions tracked — e.g. a shared or relative's
-        account. Existing transactions from it stay visible; only new ones will be skipped.
+        Accounts detected from your transactions.
       </Text>
 
       {accountsError && <Text style={s.accountsErrorText}>{accountsError}</Text>}
@@ -237,12 +231,6 @@ export default function AccountsTab() {
                 {item.account_number_masked ? ` · ${item.account_number_masked}` : ''}
               </Text>
             </View>
-            <Switch
-              value={item.is_active ?? true}
-              onValueChange={(next) => handleToggle(item, next)}
-              trackColor={{ true: colors.brand }}
-              disabled={busyId === item.id}
-            />
           </View>
         ))
       )}

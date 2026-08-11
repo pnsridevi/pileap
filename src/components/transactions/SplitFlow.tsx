@@ -132,7 +132,6 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   const handleAddCategory = (idx: number) => {
     const trimmed = lines[idx].newCategoryText.trim();
     if (!trimmed) return;
-    const lineType = lines[idx].type;
     updateLine(idx, {
       category: trimmed,
       subCategory: trimmed,
@@ -140,15 +139,11 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
       addingCategory: false,
     });
     setFormError(null);
-
-    // [ADD] Persist so this category is selectable for any future
-    // merchant/transaction/line, not just this one. sub_category saved as
-    // null (not `trimmed`, despite this line's own subCategory defaulting
-    // to the same string) — no real subcategory was chosen via this
-    // control. Fire-and-forget, same reasoning as EditModal/add.tsx.
-    saveUserCategory(lineType, trimmed, null)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + trimmed, type: lineType, category: trimmed, sub_category: null }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] No longer persists to user_categories here — deferred to
+    // handleSubmit() below, once per line, with each line's FINAL
+    // category/subCategory. Same reasoning as EditModal/add.tsx: saving
+    // immediately here created a stray (category, null) row whenever a
+    // subcategory was typed right after.
   };
 
   // [ADD] Confirms a typed subcategory name for one line — works whether
@@ -156,7 +151,6 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
   // typed in above.
   const handleAddSubCategory = (idx: number) => {
     const trimmed = lines[idx].newSubCategoryText.trim();
-    const lineType = lines[idx].type;
     const lineCategory = lines[idx].category;
     if (!trimmed || !lineCategory) return;
     updateLine(idx, {
@@ -165,11 +159,7 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
       addingSubCategory: false,
     });
     setFormError(null);
-
-    // [ADD] Same reasoning as handleAddCategory above.
-    saveUserCategory(lineType, lineCategory, trimmed)
-      .then(() => setUserCategories((prev) => [...prev, { id: 'local-' + lineCategory + '-' + trimmed, type: lineType, category: lineCategory, sub_category: trimmed }]))
-      .catch((e) => console.error('Failed to save user category:', e));
+    // [CHANGE] Same reasoning as handleAddCategory above — no DB write here.
   };
 
   // [FIX] Previously only checked matches/line-count, silently no-opping
@@ -194,6 +184,27 @@ export function SplitFlow({ visible, transaction, onCancel, onSubmit }: Props) {
       return;
     }
     setFormError(null);
+
+    // [ADD] Persist any newly typed category/subcategory to user_categories
+    // now — at the moment the split is actually confirmed, not earlier
+    // when "+ Add new" was tapped on a given line (see handleAddCategory/
+    // handleAddSubCategory's comments for why). One save per line that
+    // actually has something new, using each line's FINAL category/
+    // subCategory — recomputes the same isCustomCategory/isCustomSubCategory
+    // check the render loop uses, since that's line-scoped state not
+    // otherwise available here. Fire-and-forget per line: a failed save
+    // shouldn't block the split itself, only future reuse of that category.
+    for (const l of lines) {
+      const lineCategoryDefs = mergeUserCategoriesIntoTaxonomy(TAXONOMY[l.type] ?? [], userCategories, l.type);
+      const lineActiveDef = lineCategoryDefs.find((c) => c.category === l.category);
+      const lineSubOptions = lineActiveDef?.subCategories ?? [];
+      const lineIsCustomCategory = l.category !== '' && !lineActiveDef;
+      const lineIsCustomSubCategory = !!l.subCategory && !lineSubOptions.includes(l.subCategory);
+      if (lineIsCustomCategory || lineIsCustomSubCategory) {
+        saveUserCategory(l.type, l.category, l.subCategory ?? null)
+          .catch((e) => console.error('Failed to save user category:', e));
+      }
+    }
 
     const splitLines: SplitLineInput[] = lines.map((l) => ({
       amount: signedAmount(parseFloat(l.amountText) || 0, l.type, l.subCategory),

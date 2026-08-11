@@ -215,12 +215,24 @@ export interface ResolvedCategory {
  * (NOT a separate slug/key — that mismatch was the bug this file fixes).
  * Falls back to "Uncategorized" so callers never need their own null
  * guard — an unrecognized category still renders sensibly instead of an
- * empty badge. */
+ * empty badge.
+ *
+ * [FIX] Was `if (!category || !COLOR_BY_CATEGORY[category])` — treating
+ * "no color found" as equivalent to "no category at all" and relabeling
+ * BOTH cases as "Uncategorized". That's wrong for a real, non-null
+ * category string that just isn't in the built-in TAXONOMY above — e.g.
+ * a custom category a user typed via "+ Add new" (see user_categories.ts)
+ * has no entry here (this file's static list can't know about it), so
+ * every such transaction rendered as "Uncategorized" even though the
+ * actual stored category ("Kids", say) was correct. Only a genuinely
+ * missing/null category should ever get relabeled — an unrecognized but
+ * real category should still show its own name, just with the neutral
+ * fallback color since there's no color mapping for it. */
 export function getCategory(category: string | null | undefined): ResolvedCategory {
-  if (!category || !COLOR_BY_CATEGORY[category]) {
+  if (!category) {
     return { label: 'Uncategorized', color: UNCATEGORIZED_COLOR };
   }
-  return { label: category, color: COLOR_BY_CATEGORY[category] };
+  return { label: category, color: COLOR_BY_CATEGORY[category] ?? UNCATEGORIZED_COLOR };
 }
 
 /** Returns the signed amount given a magnitude + type + optional

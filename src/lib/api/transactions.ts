@@ -663,25 +663,16 @@ async function findExistingTransactionForSms(
   return data ? data.id : null;
 }
 
-// [NEW] Cheap pre-filter for ingestParsedMessages(), NOT a replacement for
-// findExistingTransactionForSms()'s exact-match check above. That check
-// still runs on every row that passes this filter — this only skips rows
-// that are so old they can't possibly be new, avoiding a DB round-trip per
-// row for the (common, on every re-sync of an overlapping window) case of
-// re-parsing days that were already fully synced.
-//
-// Deliberately >= the latest synced txn_date, not >: a message dated on the
-// same calendar day as the latest synced row may still be genuinely new
-// (e.g. a second purchase made later the same day, after the last sync
-// ran) — SMS carry a date but this function only ever sees the DATE part,
-// not the original time, so "same day" can't be assumed already-covered.
-// Rows on that boundary day still go through the normal exact-match +
-// duplicate-candidate pipeline in insertTransaction(); only strictly-older
-// days are skipped outright here.
-//
-// Scoped to is_deleted=false, matching findExistingTransactionForSms()'s
-// same scoping — a soft-deleted row (e.g. a resolved duplicate) shouldn't
-// count as "already synced" for this purpose either.
+// [REMOVED — this pass, no longer called] Was used as a cheap pre-filter
+// in ingestParsedMessages() — removed after real device testing showed it
+// causes actual data loss when combined with SmsReader's newest-first read
+// order and a mid-sync crash: the watermark it computes gets pushed to the
+// newest synced date, then wrongly treats older, still-unsynced messages
+// as already covered. See ingestParsedMessages()'s comment at the removal
+// site for the full explanation. Left defined here, unused, rather than
+// deleted, in case a future design revives a corrected version of this
+// idea — do not wire this back in without also fixing the
+// newest-first-processing interaction described above.
 async function getLatestSyncedTxnDate(userId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('transactions')
@@ -1175,13 +1166,13 @@ export interface IngestResult {
    * window until Known Gap #1 (no idempotency key) is fixed — that's a
    * real, visible consequence of that gap, not evidence of a new bug. */
   duplicatesFlagged: number;
-  /** [NEW] Count of items skipped outright because their txn_date fell
-   * strictly before the latest already-synced txn_date for this user — see
-   * getLatestSyncedTxnDate()'s comment for why this is a >= cutoff, not a
-   * hard guarantee of no duplicates on the boundary day itself. This is
-   * purely a network-cost optimization; correctness still comes from
-   * insertTransaction()'s per-row exact-match + duplicate-candidate checks
-   * on whatever remains after this filter. */
+  /** [REMOVED — this pass] Always 0 now. The day-level pre-filter that
+   * populated this was removed — confirmed to cause real data loss when
+   * combined with newest-first SMS read order and a mid-sync crash. See
+   * ingestParsedMessages()'s comment at the removal site for the full
+   * story. Kept in the type only so any caller/UI reading this field
+   * doesn't break; skippedAlreadySynced (below) is the real, precise
+   * replacement. */
   skippedBeforeLastSync: number;
   /** [ADD] Count of items skipped because this device's local synced-IDs
    * cache (syncedSmsCache.ts) already recognizes their raw_sms_id from an
@@ -1229,28 +1220,36 @@ export async function ingestParsedMessages(
     errors: [],
   };
 
-  // [NEW] Skip re-processing days that are already fully synced. Balance
-  // updates are exempt — applyBalanceUpdate() already self-guards on
-  // update.message_date vs the account's current balance_updated_at, so
-  // there's no cost/correctness reason to filter those here too, and doing
-  // so would risk skipping a legitimate balance refresh.
-  const latestSyncedDate = await getLatestSyncedTxnDate(userId);
-  const afterDateFilter = latestSyncedDate
-    ? items.filter((item) => isBalanceUpdate(item) || item.txn_date >= latestSyncedDate)
-    : items;
-  result.skippedBeforeLastSync = items.length - afterDateFilter.length;
+  /** [REMOVED — this pass] There used to be a coarse day-level pre-filter
+   * here (getLatestSyncedTxnDate / skippedBeforeLastSync), skipping any
+   * item dated before the latest already-synced txn_date. It was designed
+   * as a cheap cost optimization on top of a fully-correct per-row check
+   * further down — but confirmed via real device testing to cause actual
+   * data loss: SmsReader.getMessages() reads "date DESC" (newest first),
+   * so a crash partway through a sync always leaves the NEWEST messages
+   * synced first. That pushes the "latest synced date" watermark close to
+   * today, and on the next run this filter then treated every OLDER,
+   * still-unsynced message as if it were already covered — silently
+   * dropping them before they ever reached the per-message check below.
+   * Real observed case: 50 of 227 synced before a force-close, all in the
+   * newest cluster; on retry, only 17 messages (sharing that exact newest
+   * date) were recognized, and the other ~177 genuinely-unsynced older
+   * messages were never attempted, with nothing in the UI indicating they
+   * were skipped.
+   * Removed rather than adjusted: the per-message cache below
+   * (syncedSmsCache.ts) is a complete, precise replacement — it makes no
+   * assumption about processing order, checks each message individually,
+   * and is cheaper (a local read, not a network round-trip) than this
+   * filter ever was. There is no remaining scenario where this date
+   * filter added value the per-message cache doesn't already cover. */
 
   // [ADD] Skip messages this device already knows it successfully synced —
   // see syncedSmsCache.ts for exactly what this does and doesn't protect
-  // against. Deliberately a SEPARATE, additional filter from the date-based
-  // one above, not a replacement for it: the date filter is a cheap
-  // day-level pre-filter that runs regardless of this cache's state (e.g.
-  // still helps on a brand new device with an empty cache but existing
-  // server data), while this one is what actually closes the crash-retry
-  // gap within the boundary day itself.
+  // against. This is now the ONLY pre-filter (see removal note above) —
+  // applied directly to `items`, not to a date-filtered subset.
   const syncedIds = await getSyncedSmsIds(userId);
-  const itemsToProcess = afterDateFilter.filter((item) => !syncedIds.has(item.raw_sms_id));
-  result.skippedAlreadySynced = afterDateFilter.length - itemsToProcess.length;
+  const itemsToProcess = items.filter((item) => !syncedIds.has(item.raw_sms_id));
+  result.skippedAlreadySynced = items.length - itemsToProcess.length;
 
   // [CHANGED — this pass] Chunked instead of one continuous loop over every
   // item. Each chunk's successfully-processed raw_sms_ids are written to

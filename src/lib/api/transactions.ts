@@ -117,6 +117,7 @@ import { isBalanceUpdate, matchCustomCategory, matchRegisteredFact, normaliseMer
 // given custom category / registered fact existed.
 import { fetchCustomCategories } from './customCategories';
 import { fetchActiveRegisteredFacts } from './registeredFacts';
+import { getSyncedSmsIds, markSmsIdsSynced } from '../syncedSmsCache';
 
 // [CHANGED] Real login is now in place (phone/OTP via Supabase Auth). Every
 // function that used to read the CURRENT_USER_ID constant now calls this
@@ -1182,11 +1183,32 @@ export interface IngestResult {
    * insertTransaction()'s per-row exact-match + duplicate-candidate checks
    * on whatever remains after this filter. */
   skippedBeforeLastSync: number;
+  /** [ADD] Count of items skipped because this device's local synced-IDs
+   * cache (syncedSmsCache.ts) already recognizes their raw_sms_id from an
+   * earlier run — see that file's docblock for exactly what this does and
+   * doesn't protect against. These never reach insertTransaction() at
+   * all, so unlike duplicatesFlagged, they never create a row and never
+   * need manual review — this is what actually fixes the "crash mid-sync,
+   * retry floods the review queue" problem. */
+  skippedAlreadySynced: number;
   errors: { raw_sms_id: string; message: string }[];
 }
 
+/** [ADD] Optional progress callback — invoked after each chunk completes
+ * with how many of itemsToProcess have been attempted so far. Purely for
+ * UI ("340/600 synced"); ingestParsedMessages() behaves identically
+ * whether or not a caller passes this. */
+export type IngestProgressCallback = (processed: number, total: number) => void;
+
+// [ADD] Chunk size for the main sync loop below — see the chunking
+// discussion this was built from. Kept as a named constant rather than a
+// magic number so it's one obvious place to tune if real-world timing
+// data later suggests a different size.
+const SYNC_CHUNK_SIZE = 25;
+
 export async function ingestParsedMessages(
   items: (ParsedTransaction | BalanceUpdate)[],
+  onProgress?: IngestProgressCallback,
 ): Promise<IngestResult> {
   // [CHANGED] Fetched ONCE per sync run, not once per message. Each of these
   // was previously an independent supabase.auth.getUser() call — which
@@ -1203,6 +1225,7 @@ export async function ingestParsedMessages(
     duplicatesSkipped: 0,
     duplicatesFlagged: 0,
     skippedBeforeLastSync: 0,
+    skippedAlreadySynced: 0,
     errors: [],
   };
 
@@ -1212,47 +1235,82 @@ export async function ingestParsedMessages(
   // there's no cost/correctness reason to filter those here too, and doing
   // so would risk skipping a legitimate balance refresh.
   const latestSyncedDate = await getLatestSyncedTxnDate(userId);
-  const itemsToProcess = latestSyncedDate
+  const afterDateFilter = latestSyncedDate
     ? items.filter((item) => isBalanceUpdate(item) || item.txn_date >= latestSyncedDate)
     : items;
-  result.skippedBeforeLastSync = items.length - itemsToProcess.length;
+  result.skippedBeforeLastSync = items.length - afterDateFilter.length;
 
-  let processed = 0;
+  // [ADD] Skip messages this device already knows it successfully synced —
+  // see syncedSmsCache.ts for exactly what this does and doesn't protect
+  // against. Deliberately a SEPARATE, additional filter from the date-based
+  // one above, not a replacement for it: the date filter is a cheap
+  // day-level pre-filter that runs regardless of this cache's state (e.g.
+  // still helps on a brand new device with an empty cache but existing
+  // server data), while this one is what actually closes the crash-retry
+  // gap within the boundary day itself.
+  const syncedIds = await getSyncedSmsIds(userId);
+  const itemsToProcess = afterDateFilter.filter((item) => !syncedIds.has(item.raw_sms_id));
+  result.skippedAlreadySynced = afterDateFilter.length - itemsToProcess.length;
 
-  for (const item of itemsToProcess) {
-    try {
-      if (isBalanceUpdate(item)) {
-        await applyBalanceUpdate(item, userId);
-        result.balancesUpdated++;
-      } else {
-        const { id: newId, skipPairing } = await insertTransaction(item, userId);
-        result.transactionsInserted++;
+  // [CHANGED — this pass] Chunked instead of one continuous loop over every
+  // item. Each chunk's successfully-processed raw_sms_ids are written to
+  // the local cache as soon as that chunk finishes — not just once at the
+  // very end — so if the app is killed between chunks, everything up to
+  // the last completed chunk is protected on the next run; only the
+  // in-flight chunk at the moment of the crash is ever re-attempted.
+  for (let chunkStart = 0; chunkStart < itemsToProcess.length; chunkStart += SYNC_CHUNK_SIZE) {
+    const chunk = itemsToProcess.slice(chunkStart, chunkStart + SYNC_CHUNK_SIZE);
+    const succeededIdsThisChunk: string[] = [];
 
-        // [NEW — this pass] Every insert now succeeds (no more silent
-        // DB-level rejection), so check afterward whether it was flagged as
-        // a possible duplicate, purely for the summary count.
-        const { data: inserted, error: fetchErr } = await supabase
-          .from('transactions')
-          .select('possible_duplicate_of')
-          .eq('id', newId)
-          .single();
-        if (!fetchErr && inserted?.possible_duplicate_of) {
-          result.duplicatesFlagged++;
+    for (const item of chunk) {
+      try {
+        if (isBalanceUpdate(item)) {
+          await applyBalanceUpdate(item, userId);
+          result.balancesUpdated++;
+        } else {
+          const { id: newId, skipPairing } = await insertTransaction(item, userId);
+          result.transactionsInserted++;
+
+          // [NEW — this pass] Every insert now succeeds (no more silent
+          // DB-level rejection), so check afterward whether it was flagged as
+          // a possible duplicate, purely for the summary count.
+          const { data: inserted, error: fetchErr } = await supabase
+            .from('transactions')
+            .select('possible_duplicate_of')
+            .eq('id', newId)
+            .single();
+          if (!fetchErr && inserted?.possible_duplicate_of) {
+            result.duplicatesFlagged++;
+          }
+
+          if (!skipPairing) await runContraDetection(newId);
         }
-
-        if (!skipPairing) await runContraDetection(newId);
+        // [ADD] Only mark as synced on genuine success — an item that
+        // threw must NOT be cached, or a persistently-failing message
+        // (e.g. a real server error) would silently never be retried.
+        succeededIdsThisChunk.push(item.raw_sms_id);
+      } catch (e) {
+        result.errors.push({
+          raw_sms_id: item.raw_sms_id,
+          message: getErrorMessage(e),
+        });
       }
-    } catch (e) {
-      result.errors.push({
-        raw_sms_id: item.raw_sms_id,
-        message: getErrorMessage(e),
-      });
     }
 
-    processed++;
-    if (processed % 10 === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    // [ADD] Persist this chunk's progress before moving to the next one —
+    // see the chunk-loop comment above for why this is what actually makes
+    // a crash between chunks safe to resume from.
+    await markSmsIdsSynced(userId, succeededIdsThisChunk);
+
+    const processedSoFar = Math.min(chunkStart + SYNC_CHUNK_SIZE, itemsToProcess.length);
+    onProgress?.(processedSoFar, itemsToProcess.length);
+
+    // Yield to the UI thread between chunks (was: every 10 items inside one
+    // continuous loop). Chunk-level yielding is coarser but the loop itself
+    // is now bounded in size per chunk, so total time-without-yielding per
+    // chunk stays comparable to before while chunk boundaries also double
+    // as the cache-persistence points above.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   return result;

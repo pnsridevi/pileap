@@ -31,6 +31,10 @@ export default function TestSmsScreen() {
   const [rawParseResults, setRawParseResults] = useState<(ParsedTransaction | BalanceUpdate)[]>([]);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
   const [syncResult, setSyncResult] = useState<IngestResult | null>(null);
+  // [ADD] Populated via ingestParsedMessages()'s onProgress callback while
+  // syncStatus === 'syncing' — lets the sync button show "340/600" instead
+  // of just a spinner for a potentially long-running chunked sync.
+  const [syncProgress, setSyncProgress] = useState<{ processed: number; total: number } | null>(null);
   // [ADD] Surfaced purely for the debug screen's own visibility — shows how
   // many registered_facts/custom_categories were actually fetched and used
   // for this parse run, so a "why didn't this match" question during
@@ -100,6 +104,7 @@ export default function TestSmsScreen() {
       setRawParseResults(results);
       setSyncResult(null);
       setSyncStatus('idle');
+      setSyncProgress(null);
       const txns = results.filter((r): r is ParsedTransaction => !isBalanceUpdate(r));
       const balances = results.filter(isBalanceUpdate);
       setParsed(txns);
@@ -167,15 +172,18 @@ export default function TestSmsScreen() {
     Alert.alert(
       'Sync to Supabase?',
       `This will insert ${parsed.length} transaction(s) and apply ${balanceUpdates.length} balance update(s). ` +
-      // [FIX] Old copy said "there is no duplicate-detection yet — re-
-      // syncing the same window will create duplicate rows," which was
-      // true and was the confirmed root cause of real duplicate rows in
-      // production. insertTransaction() now checks (user_id, raw_text,
-      // txn_date) before inserting and skips anything already present, so
-      // re-syncing the same window is safe — this button is additionally
-      // now disabled after a completed sync as defense in depth, but the
-      // real protection lives server-side.
-      `Already-synced messages will be skipped automatically. Continue?`,
+      // [FIX] Previous copy here claimed insertTransaction() "checks
+      // (user_id, raw_text, txn_date) before inserting and skips anything
+      // already present" — that was true at one point but is no longer
+      // accurate: that check now FLAGS an exact-text match rather than
+      // skipping it (deliberately — see transactions.ts's comment on
+      // findExistingTransactionForSms for the real ₹1000 NACH SIP
+      // same-day case that made a hard skip there unsafe). What actually
+      // makes a re-sync of the same window safe now is the separate
+      // device-local synced-IDs cache (syncedSmsCache.ts) — messages this
+      // device already synced are skipped before they're even attempted,
+      // so no new row and no duplicate flag gets created for them.
+      `Messages already synced from this device will be skipped automatically. Continue?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -184,14 +192,19 @@ export default function TestSmsScreen() {
           onPress: async () => {
             setSyncStatus('syncing');
             setSyncResult(null);
+            setSyncProgress(null);
             try {
-              const result = await ingestParsedMessages(rawParseResults);
+              const result = await ingestParsedMessages(
+                rawParseResults,
+                (processedCount, total) => setSyncProgress({ processed: processedCount, total }),
+              );
               setSyncResult(result);
               setSyncStatus('done');
               Alert.alert(
                 'Sync complete',
                 `${result.transactionsInserted} transaction(s) inserted, ` +
                 `${result.balancesUpdated} balance update(s) applied` +
+                (result.skippedAlreadySynced > 0 ? `, ${result.skippedAlreadySynced} already synced (skipped)` : '') +
                 (result.errors.length > 0 ? `, ${result.errors.length} error(s) — see details below.` : '.'),
               );
             } catch (e: any) {
@@ -326,7 +339,13 @@ export default function TestSmsScreen() {
             activeOpacity={0.8}
           >
             {syncStatus === 'syncing' ? (
-              <ActivityIndicator color="#065f46" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <ActivityIndicator color="#065f46" />
+                {/* [ADD] Live chunk progress — see syncProgress state above. */}
+                {syncProgress && (
+                  <Text style={s.syncBtnText}>{syncProgress.processed}/{syncProgress.total}</Text>
+                )}
+              </View>
             ) : (
               <Text style={s.syncBtnText}>☁️ Sync to Supabase — {activeWindow}</Text>
             )}
@@ -337,6 +356,10 @@ export default function TestSmsScreen() {
           <View style={s.syncResultBox}>
             <Text style={s.syncResultText}>
               ✅ {syncResult.transactionsInserted} inserted · 🏦 {syncResult.balancesUpdated} balance updates
+              {/* [ADD] Honest accounting of the local-cache skip, so a
+                  low insert count on a resync reads as "already synced,"
+                  not "something's wrong." */}
+              {syncResult.skippedAlreadySynced > 0 ? ` · ⏭️ ${syncResult.skippedAlreadySynced} already synced` : ''}
               {syncResult.errors.length > 0 ? ` · ⚠️ ${syncResult.errors.length} errors` : ''}
             </Text>
             {syncResult.errors.slice(0, 5).map((err, i) => (

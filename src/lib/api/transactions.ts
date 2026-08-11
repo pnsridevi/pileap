@@ -620,6 +620,46 @@ async function findExistingConfirmingCredit(
   return !!(data && data.length > 0);
 }
 
+// [ADD] The one case that's safe to treat as a TRUE skip — not a flag.
+// Requires BOTH raw_sms_id AND raw_text to match an existing row, not
+// either alone:
+//   - raw_sms_id alone is unsafe: Android's SMS content provider _id is
+//     not documented as permanently non-reusable. If the OS ever recycled
+//     a deleted message's _id for an unrelated new message, matching on
+//     ID alone would silently treat that new, real transaction as
+//     "already synced" and drop it forever.
+//   - raw_text alone is unsafe for the reason findExistingTransactionForSms
+//     above already documents — two different real transactions (e.g. two
+//     separate NACH SIP debits the same day) can share identical text.
+// A message matching on BOTH signals together — the same specific device
+// message ID AND the same exact text — has no realistic path to being a
+// coincidence rather than a genuine re-read of the same physical SMS
+// (e.g. after Clear Data wiped the local synced-IDs cache in
+// syncedSmsCache.ts but Supabase data survived). That's the one case this
+// function exists to catch and skip cleanly, with no new row and no
+// duplicate flag — unlike every other check in this file, which flags
+// rather than skips.
+//
+// Scoped to is_deleted=false, same reasoning as findExistingTransactionForSms.
+async function findGenuineResyncMatch(
+  userId: string,
+  rawSmsId: string,
+  rawText: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('raw_sms_id', rawSmsId)
+    .eq('raw_text', rawText)
+    .eq('is_deleted', false)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? data.id : null;
+}
+
 // [CHANGED — this pass] No longer a hard skip. Originally added to stop
 // the same SMS being silently re-inserted (e.g. test-sms.tsx's sync button
 // tapped twice), keyed on (user_id, raw_text, txn_date) since raw_sms_id
@@ -687,7 +727,18 @@ async function getLatestSyncedTxnDate(userId: string): Promise<string | null> {
   return data ? data.txn_date : null;
 }
 
-async function insertTransaction(txn: ParsedTransaction, userId: string): Promise<{ id: string; skipPairing: boolean }> {
+async function insertTransaction(txn: ParsedTransaction, userId: string): Promise<{ id: string; skipPairing: boolean; alreadyExisted?: boolean }> {
+  // [ADD] Checked FIRST, before any other work — see
+  // findGenuineResyncMatch()'s docblock above for exactly what this does
+  // and doesn't cover. This is the only true skip in this function; every
+  // other duplicate signal below still flags-and-inserts, unchanged.
+  if (txn.raw_sms_id && txn.raw_text) {
+    const genuineResyncId = await findGenuineResyncMatch(userId, txn.raw_sms_id, txn.raw_text);
+    if (genuineResyncId) {
+      return { id: genuineResyncId, skipPairing: true, alreadyExisted: true };
+    }
+  }
+
   // [CHANGED — this pass] Still checked first, before any other work, but
   // no longer returns early — see findExistingTransactionForSms()'s
   // docblock above. Carried forward as exactTextMatchId and folded into
@@ -864,6 +915,9 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
     source:                txn.source,
     status,
     raw_text:              txn.raw_text,
+    // [ADD] Persisted for the first time — see findGenuineResyncMatch()
+    // above, which is what actually reads this back on future syncs.
+    raw_sms_id:            txn.raw_sms_id ?? null,
     // [FIX] Was never written — resolvedFrom made it as far as the in-memory
     // ParsedTransaction object and died there. See add_resolved_from.sql for
     // the column this now writes into, and the Transaction interface change
@@ -1182,6 +1236,14 @@ export interface IngestResult {
    * need manual review — this is what actually fixes the "crash mid-sync,
    * retry floods the review queue" problem. */
   skippedAlreadySynced: number;
+  /** [ADD] Count of items where findGenuineResyncMatch() (the raw_sms_id +
+   * raw_text DB check) caught a genuine resync that the LOCAL cache above
+   * had no record of — e.g. after Clear Data wiped the device's memory
+   * but Supabase data survived. Distinct from skippedAlreadySynced
+   * (which never even reached the network) so a nonzero value here is a
+   * visible signal that the local cache was out of sync with the server,
+   * not just routine local-cache housekeeping. */
+  recoveredViaServerCheck: number;
   errors: { raw_sms_id: string; message: string }[];
 }
 
@@ -1217,6 +1279,7 @@ export async function ingestParsedMessages(
     duplicatesFlagged: 0,
     skippedBeforeLastSync: 0,
     skippedAlreadySynced: 0,
+    recoveredViaServerCheck: 0,
     errors: [],
   };
 
@@ -1267,22 +1330,37 @@ export async function ingestParsedMessages(
           await applyBalanceUpdate(item, userId);
           result.balancesUpdated++;
         } else {
-          const { id: newId, skipPairing } = await insertTransaction(item, userId);
-          result.transactionsInserted++;
+          const { id: newId, skipPairing, alreadyExisted } = await insertTransaction(item, userId);
 
-          // [NEW — this pass] Every insert now succeeds (no more silent
-          // DB-level rejection), so check afterward whether it was flagged as
-          // a possible duplicate, purely for the summary count.
-          const { data: inserted, error: fetchErr } = await supabase
-            .from('transactions')
-            .select('possible_duplicate_of')
-            .eq('id', newId)
-            .single();
-          if (!fetchErr && inserted?.possible_duplicate_of) {
-            result.duplicatesFlagged++;
+          // [ADD] A genuine resync (findGenuineResyncMatch matched) — the
+          // row already existed before this call, nothing was inserted.
+          // Don't count it as a fresh insert, don't re-check it for a
+          // duplicate flag (it was already resolved whenever it was FIRST
+          // inserted), and don't re-run contra detection (already ran the
+          // first time this row was really created). Still cache its ID
+          // below, same as a fresh insert — so if the local cache is
+          // rebuilt from scratch (e.g. after Clear Data, like the case
+          // that led here), this resync is fast next time too, not just
+          // correct this time.
+          if (alreadyExisted) {
+            result.recoveredViaServerCheck++;
+          } else {
+            result.transactionsInserted++;
+
+            // [NEW — this pass] Every insert now succeeds (no more silent
+            // DB-level rejection), so check afterward whether it was flagged as
+            // a possible duplicate, purely for the summary count.
+            const { data: inserted, error: fetchErr } = await supabase
+              .from('transactions')
+              .select('possible_duplicate_of')
+              .eq('id', newId)
+              .single();
+            if (!fetchErr && inserted?.possible_duplicate_of) {
+              result.duplicatesFlagged++;
+            }
+
+            if (!skipPairing) await runContraDetection(newId);
           }
-
-          if (!skipPairing) await runContraDetection(newId);
         }
         // [ADD] Only mark as synced on genuine success — an item that
         // threw must NOT be cached, or a persistently-failing message

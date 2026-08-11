@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, ActivityIndicator, Platform, PermissionsAndroid, Alert,
@@ -6,6 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+// [ADD] useNavigation — matches the same 'expo-router' re-export convention
+// already used elsewhere in this codebase (see useTransactionFeed.ts's
+// useFocusEffect import) rather than importing directly from
+// '@react-navigation/native'.
+import { useNavigation } from 'expo-router';
 import { colors, spacing, fontSize, fontWeight, radius } from '@/constants/theme';
 import { SmsReader, SmsMessage } from '../../modules/sms-reader/src/index';
 import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext } from '@/lib/smsParser';
@@ -40,6 +45,43 @@ export default function TestSmsScreen() {
   // for this parse run, so a "why didn't this match" question during
   // testing has an immediate answer instead of requiring a DB query.
   const [matchContextInfo, setMatchContextInfo] = useState<{ facts: number; customCats: number } | null>(null);
+
+  // [ADD] Exit-confirmation guard while a sync is actively running.
+  // Intercepts in-app navigation away from this screen — tab switch, back
+  // button, back-gesture — while syncStatus === 'syncing', and asks the
+  // user to confirm before letting them leave.
+  //
+  // IMPORTANT SCOPE — what this can and can't do: this only intercepts
+  // navigation that goes through React Navigation's own history (tab
+  // taps, the Android back button/gesture, a header back button). It
+  // CANNOT intercept and CANNOT prevent the OS killing the app in the
+  // background, the user swiping the app away from the recent-apps
+  // switcher, or a genuine crash — none of those fire any JS event this
+  // code could hook into. This guard reduces how OFTEN an interruption
+  // happens (the casual "let me just check something else" tab-switch
+  // mid-sync); it is NOT what makes an interruption safe — that's the
+  // chunking + syncedSmsCache.ts combination in ingestParsedMessages(),
+  // which protects correctness regardless of whether this guard fires.
+  const navigation = useNavigation();
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (syncStatus !== 'syncing') return; // not syncing — let navigation proceed normally
+      e.preventDefault();
+      Alert.alert(
+        'Sync in progress',
+        'Leaving now is safe — messages already synced are saved, and the rest will pick up automatically next time you sync. Leave anyway?',
+        [
+          { text: 'Stay', style: 'cancel' },
+          {
+            text: 'Leave',
+            style: 'destructive',
+            onPress: () => navigation.dispatch(e.data.action),
+          },
+        ],
+      );
+    });
+    return unsubscribe;
+  }, [navigation, syncStatus]);
 
   async function requestPermission() {
     if (Platform.OS !== 'android') { setError('SMS reading is Android only.'); return; }

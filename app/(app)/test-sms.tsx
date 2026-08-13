@@ -247,6 +247,16 @@ export default function TestSmsScreen() {
                 `${result.transactionsInserted} transaction(s) inserted, ` +
                 `${result.balancesUpdated} balance update(s) applied` +
                 (result.skippedAlreadySynced > 0 ? `, ${result.skippedAlreadySynced} already synced (skipped)` : '') +
+                // [FIX] recoveredViaServerCheck existed on IngestResult but
+                // was never actually shown anywhere — meaning any item this
+                // device's local cache didn't recognize but the server-side
+                // check (findGenuineResyncMatch) still correctly caught was
+                // silently invisible in this summary. Confirmed real: a
+                // 225-row DB cross-check came up 4 short of
+                // (inserted + skippedAlreadySynced) until this count was
+                // included — those 4 were real, correctly-handled recoveries
+                // that just weren't being reported.
+                (result.recoveredViaServerCheck > 0 ? `, ${result.recoveredViaServerCheck} recovered via server check` : '') +
                 (result.errors.length > 0 ? `, ${result.errors.length} error(s) — see details below.` : '.'),
               );
             } catch (e: any) {
@@ -402,6 +412,10 @@ export default function TestSmsScreen() {
                   low insert count on a resync reads as "already synced,"
                   not "something's wrong." */}
               {syncResult.skippedAlreadySynced > 0 ? ` · ⏭️ ${syncResult.skippedAlreadySynced} already synced` : ''}
+              {/* [FIX] Was missing entirely — see the Alert-copy comment
+                  above for why this matters: without it, totals silently
+                  don't add up to what's actually in the database. */}
+              {syncResult.recoveredViaServerCheck > 0 ? ` · 🔎 ${syncResult.recoveredViaServerCheck} recovered` : ''}
               {syncResult.errors.length > 0 ? ` · ⚠️ ${syncResult.errors.length} errors` : ''}
             </Text>
             {syncResult.errors.slice(0, 5).map((err, i) => (

@@ -235,12 +235,18 @@
 
 // Layer 2 — require() because it is a CommonJS .js file
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-// [FLAG — NOT FIXED] This imports './layer2_ruleset.js', but the file we
-// have is named 'ruleset.js' (per its own header: "Location:
-// apps/mobile/layer2/ruleset.js"). Left as-is since we can't see the actual
-// repo layout from here — please confirm this resolves correctly in your
-// build, or update one side to match the other.
+// [CONFIRMED, not a bug] './layer2_ruleset.js' and 'ruleset.js' are two
+// copies of the same rules, kept in sync manually — 'layer2_ruleset.js' is
+// the on-device/JS-only testing copy used until the Kotlin native module
+// (SmsReaderModule.kt) ships; 'ruleset.js' is the production target. Any
+// fix landing in one (e.g. the merchant '/' stop-token fix) must be
+// mirrored into the other until they're unified.
 const { matchMessage } = require('./layer2_ruleset.js');
+
+// [ADD] Confidence gate — standalone module, not yet wired to affect any
+// real decision. See confidenceGate.js's own header for full scope/history.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { assessConfidence } = require('./confidenceGate.js');
 
 // ─── Platform-agnostic input (arch 10.2) ─────────────────────────────────────
 
@@ -249,6 +255,72 @@ export interface RawMessage {
   address: string;   // SMS shortcode or email sender domain
   body:    string;   // raw message text
   date:    number;   // epoch milliseconds
+}
+
+// ─── Logging only — NOT wired to any real decision or Haiku call ────────────
+//
+// Two separate logs, deliberately kept apart because they mean different
+// things:
+//
+// Log A ("haiku candidates") — messages that already, today, get routed
+// toward eventual Haiku escalation via the existing pending_review /
+// parse_failure mechanism (missing_amount, unknown_direction,
+// escalated_to_haiku). This is just a record of that already-happening
+// path; nothing here changes what parseSingleSms returns for these rows.
+//
+// Log B ("low confidence") — messages Layer 2 matched and would otherwise
+// treat as fully successful, but which the confidence gate (see
+// confidenceGate.js) thinks look structurally suspicious. These do NOT go
+// to Haiku today and their status/parse_failure is completely unaffected
+// by this — this is purely "if the gate were live, this is what it would
+// have flagged," for later comparison against ground truth.
+//
+// Both are optional and additive: if the caller doesn't pass a `logs`
+// object into parseSmsMessages(), nothing is collected and behavior is
+// byte-for-byte identical to before this change.
+
+export interface HaikuCandidateLogEntry {
+  raw_sms_id: string;
+  raw_text:   string;
+  // [ADD] The message's own date, NOT the log-write time. Deliberately
+  // NOT part of this log's identity key — transactions.ts's own history
+  // (see findExistingTransactionForSms's comments) found that (raw_text,
+  // txn_date) can collide for two genuinely different real messages (e.g.
+  // two same-day SIP debits with identical text). Kept here purely for
+  // readability when eyeballing the log later ("show me flags from
+  // March"), not for dedup — see logHaikuCandidate()/syncParseLogs() for
+  // the actual identity key used.
+  txn_date:   string;
+  reason:     'missing_amount' | 'unknown_direction' | 'escalated_to_haiku';
+  // Whatever the taxonomy-fallback extractor (extractFields) managed to
+  // pull out before giving up — useful context when reviewing the log,
+  // not a claim that any of it is reliable.
+  extracted_amount:    number | null;
+  extracted_is_credit: boolean | null;
+  extracted_merchant:  string | null;
+  extracted_bank:      string | null;
+  extracted_channel:   string | null;
+  logged_at: string; // ISO timestamp
+}
+
+export interface LowConfidenceLogEntry {
+  raw_sms_id: string;
+  raw_text:   string;
+  // [ADD] Same note as HaikuCandidateLogEntry.txn_date above — readability
+  // only, not part of the identity key.
+  txn_date:   string;
+  matched_rule: string | null;
+  l2_bank:      string | null;
+  l2_merchant:  string | null;
+  l2_amount:    number | null;
+  l2_direction: string | null;
+  confidence_gate_reasons: string[];
+  logged_at: string; // ISO timestamp
+}
+
+export interface ParseLogs {
+  haikuCandidates: HaikuCandidateLogEntry[];
+  lowConfidence:   LowConfidenceLogEntry[];
 }
 
 // ─── Output type (maps to transactions table, arch 5.3.6) ────────────────────
@@ -1589,16 +1661,22 @@ export function normaliseMerchantKey(merchant: string | null): string | null {
 // call site keeps working unchanged; matchContext just defaults to
 // undefined, and matchCustomCategory()/matchRegisteredFact() both already
 // no-op on an empty/missing list.
+// [ADD] `logs` is optional and additive. Existing callers that don't pass
+// it get identical behavior and output to before this change — nothing is
+// collected, nothing is sent anywhere, no status or parse_failure value on
+// any returned row is touched by this. Passing `logs` only causes entries
+// to accumulate into the arrays the caller provided.
 export function parseSmsMessages(
   messages: RawMessage[],
   matchContext?: MatchContext,
+  logs?: ParseLogs,
 ): (ParsedTransaction | BalanceUpdate)[] {
-  return messages.map(msg => parseSingleSms(msg, matchContext));
+  return messages.map(msg => parseSingleSms(msg, matchContext, logs));
 }
 
 // ─── Single message orchestrator ─────────────────────────────────────────────
 
-function parseSingleSms(msg: RawMessage, matchContext?: MatchContext): ParsedTransaction | BalanceUpdate {
+function parseSingleSms(msg: RawMessage, matchContext?: MatchContext, logs?: ParseLogs): ParsedTransaction | BalanceUpdate {
   const body    = msg.body;
   const isInfra = UPI_INFRA_SENDERS.some(s => msg.address.toUpperCase().includes(s));
   const msgDate = new Date(msg.date).toISOString().split('T')[0];
@@ -1626,6 +1704,33 @@ function parseSingleSms(msg: RawMessage, matchContext?: MatchContext): ParsedTra
   }
 
   if (l2 && !l2.discard) {
+    // [ADD — Log B, shadow only] Confidence gate runs here because this is
+    // exactly the case it exists for: Layer 2 "successfully" matched
+    // (amount/direction non-null, so matchMessage() didn't self-reject),
+    // but nothing has verified the rest of the extraction is actually
+    // right. Deliberately scoped to ONLY this branch — see confidenceGate.js
+    // header on why it hasn't been validated against the taxonomy-fallback
+    // path below. This block only ever pushes to `logs`; it must never be
+    // allowed to influence needsReview, status, or parse_failure below —
+    // that wiring is a separate, later decision once shadow data backs it.
+    if (logs) {
+      const gateResult = assessConfidence(l2);
+      if (gateResult.flagged) {
+        logs.lowConfidence.push({
+          raw_sms_id:   msg.id,
+          raw_text:     body,
+          txn_date:     msgDate,
+          matched_rule: l2.matched_rule,
+          l2_bank:      l2.bank,
+          l2_merchant:  l2.merchant,
+          l2_amount:    l2.amount,
+          l2_direction: l2.direction,
+          confidence_gate_reasons: gateResult.reasons,
+          logged_at: new Date().toISOString(),
+        });
+      }
+    }
+
     const isCredit = l2.direction === 'credit';
     const classification = l2.suggested_category
       ? parseSuggestedCategory(l2.suggested_category)
@@ -1716,15 +1821,18 @@ function parseSingleSms(msg: RawMessage, matchContext?: MatchContext): ParsedTra
   const extracted = extractFields(body);
 
   if (extracted.amount === null) {
+    logHaikuCandidate(logs, msg, msgDate, extracted, 'missing_amount');
     return buildEscalated(msg, msgDate, isInfra, extracted, 'missing_amount');
   }
   if (extracted.isCredit === null) {
+    logHaikuCandidate(logs, msg, msgDate, extracted, 'unknown_direction');
     return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
   }
 
   const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel, extracted.merchant, msgDate, extracted.reference_value, matchContext);
 
   if (!classification) {
+    logHaikuCandidate(logs, msg, msgDate, extracted, 'escalated_to_haiku');
     return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
   }
 
@@ -1789,6 +1897,32 @@ function buildDiscarded(
     txn_group_id: null, is_infrastructure: isInfra, health_module_tag: null,
     parse_failure: reason, raw_text: msg.body,
   };
+}
+
+// [ADD — Log A, logging only] Records that this message is headed toward
+// the existing pending_review/parse_failure escalation path — it does not
+// create the escalation (buildEscalated already does that, unchanged) and
+// does not call Haiku. No-op if `logs` wasn't passed in.
+function logHaikuCandidate(
+  logs: ParseLogs | undefined,
+  msg: RawMessage,
+  msgDate: string,
+  extracted: ExtractedFields,
+  reason: 'missing_amount' | 'unknown_direction' | 'escalated_to_haiku',
+): void {
+  if (!logs) return;
+  logs.haikuCandidates.push({
+    raw_sms_id: msg.id,
+    raw_text:   msg.body,
+    txn_date:   msgDate,
+    reason,
+    extracted_amount:    extracted.amount,
+    extracted_is_credit: extracted.isCredit,
+    extracted_merchant:  extracted.merchant,
+    extracted_bank:      extracted.bank,
+    extracted_channel:   extracted.channel,
+    logged_at: new Date().toISOString(),
+  });
 }
 
 function buildEscalated(

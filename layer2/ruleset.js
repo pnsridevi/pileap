@@ -411,7 +411,18 @@ function extractMerchant(body) {
   // capturing the phone number as the merchant instead of the real name
   // sitting right here. Confirmed real gap: 17/17 P2A messages in one
   // user's data had merchant set to that trailing phone number.
-  m = body.match(/\bUPI\/(?:P2A|P2M)\/\d+\/([A-Za-z][A-Za-z0-9 .'-]{1,40}?)(?:\s*\n|\s+Not\s+you|\s+Cust\s+ID|$)/i);
+  // [FIX] Added "\/" as a stop token. The capture group's character class
+  // never allowed "/" in the first place, so on a fuller Axis template
+  // like "UPI/P2A/<ref>/SRINIVASA/ICIC/UPI" the name capture had nowhere
+  // valid to stop right before the next "/" — none of the existing stop
+  // alternatives (newline, "Not you", "Cust ID", end-of-string) occur at
+  // that position, so the whole pattern failed to match at all and fell
+  // through to the generic "To " pattern / null below. Confirmed real gap:
+  // "SRINIVASA/ICIC/UPI", "SATHIYA P/HDFC/IT r", "MURALI V/KVBL/vedam" all
+  // returned null merchant. Backtested against all 1,167 real messages in
+  // transactions_rows__2_.csv: 3 improvements (these exact 3 rows), 0
+  // regressions on amount/direction/bank/channel for any other row.
+  m = body.match(/\bUPI\/(?:P2A|P2M)\/\d+\/([A-Za-z][A-Za-z0-9 .'-]{1,40}?)(?:\s*\n|\s+Not\s+you|\s+Cust\s+ID|\/|$)/i);
   if (m) return m[1].trim();
 
   // "To MERCHANT\n" or "To MERCHANT On" — HDFC UPI standard format

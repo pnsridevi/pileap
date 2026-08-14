@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, ActivityIndicator, Platform, PermissionsAndroid, Alert,
@@ -13,10 +13,13 @@ import * as Sharing from 'expo-sharing';
 import { useNavigation } from 'expo-router';
 import { colors, spacing, fontSize, fontWeight, radius } from '@/constants/theme';
 import { SmsReader, SmsMessage } from '../../modules/sms-reader/src/index';
-import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext } from '@/lib/smsParser';
+import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext, ParseLogs } from '@/lib/smsParser';
 import { ingestParsedMessages, IngestResult } from '@/lib/api/transactions';
 import { fetchActiveRegisteredFacts } from '@/lib/api/registeredFacts';
 import { fetchCustomCategories } from '@/lib/api/customCategories';
+// [ADD] Log A / Log B upload — logging only, see parseLogs.ts header for
+// why this is intentionally kept separate from ingestParsedMessages().
+import { syncParseLogs, ParseLogSyncResult } from '@/lib/api/parseLogs';
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
@@ -45,6 +48,13 @@ export default function TestSmsScreen() {
   // for this parse run, so a "why didn't this match" question during
   // testing has an immediate answer instead of requiring a DB query.
   const [matchContextInfo, setMatchContextInfo] = useState<{ facts: number; customCats: number } | null>(null);
+
+  // [ADD] Log A / Log B — accumulated during the current parse run, then
+  // uploaded (best-effort, own failure path) when the user taps Sync.
+  // useRef, not useState: entries are pushed into it by smsParser.ts
+  // during parseSmsMessages() itself, not read reactively per-push.
+  const parseLogsRef = useRef<ParseLogs>({ haikuCandidates: [], lowConfidence: [] });
+  const [logSyncResult, setLogSyncResult] = useState<ParseLogSyncResult | null>(null);
 
   // [ADD] Exit-confirmation guard while a sync is actively running.
   // Intercepts in-app navigation away from this screen — tab switch, back
@@ -113,6 +123,7 @@ export default function TestSmsScreen() {
     setStatus('loading'); setError(null);
     setParsed([]); setBalanceUpdates([]); setRawMsgs([]);
     setActiveWindow(label); setMatchContextInfo(null);
+    parseLogsRef.current = { haikuCandidates: [], lowConfidence: [] };
     try {
       const msgs = await SmsReader.getMessages(fromDays, toDays);
       // Yield to UI thread before heavy parsing so the loading spinner renders
@@ -142,11 +153,12 @@ export default function TestSmsScreen() {
         setMatchContextInfo({ facts: 0, customCats: 0 });
       }
 
-      const results = parseSmsMessages(msgs, matchContext);
+      const results = parseSmsMessages(msgs, matchContext, parseLogsRef.current);
       setRawParseResults(results);
       setSyncResult(null);
       setSyncStatus('idle');
       setSyncProgress(null);
+      setLogSyncResult(null);
       const txns = results.filter((r): r is ParsedTransaction => !isBalanceUpdate(r));
       const balances = results.filter(isBalanceUpdate);
       setParsed(txns);
@@ -262,6 +274,24 @@ export default function TestSmsScreen() {
             } catch (e: any) {
               setSyncStatus('error');
               Alert.alert('Sync failed', e.message ?? 'Unknown error');
+            }
+
+            // [ADD] Log A / Log B upload — deliberately OUTSIDE the try/catch
+            // above and running regardless of whether the real sync
+            // succeeded or failed. This is diagnostic data about the parse
+            // run, not the transaction sync itself; a tester whose real
+            // sync failed still has SMS worth logging, and a log-sync
+            // failure here must never surface as if the real sync failed.
+            // syncParseLogs() itself never throws (see its own header), but
+            // it's still wrapped here as defense in depth.
+            try {
+              const logResult = await syncParseLogs(parseLogsRef.current);
+              setLogSyncResult(logResult);
+            } catch (e: any) {
+              // Should be unreachable given syncParseLogs()'s contract, but
+              // logging-only failures must never become a user-facing
+              // error state regardless.
+              console.warn('syncParseLogs threw unexpectedly:', e?.message ?? e);
             }
           },
         },
@@ -420,6 +450,20 @@ export default function TestSmsScreen() {
             </Text>
             {syncResult.errors.slice(0, 5).map((err, i) => (
               <Text key={i} style={s.syncErrorText}>#{err.raw_sms_id}: {err.message}</Text>
+            ))}
+          </View>
+        )}
+
+        {/* [ADD] Log A / Log B upload status — deliberately a separate box
+            from the real sync result above, so it's visually obvious this
+            is diagnostic-only and not part of the actual transaction sync. */}
+        {logSyncResult && (
+          <View style={s.syncResultBox}>
+            <Text style={s.syncResultText}>
+              📋 logs: {logSyncResult.haikuCandidatesInserted} haiku-candidate · {logSyncResult.lowConfidenceInserted} low-confidence
+            </Text>
+            {logSyncResult.errors.map((err, i) => (
+              <Text key={i} style={s.syncErrorText}>{err}</Text>
             ))}
           </View>
         )}

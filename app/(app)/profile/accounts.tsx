@@ -1,15 +1,49 @@
+/**
+ * app/(app)/profile/accounts.tsx
+ * Replaces app/(app)/transactions/accounts.tsx — delete that file after
+ * this lands, and remove any in-app link that pointed at
+ * '/transactions/accounts' (check transactions/index.tsx and
+ * budget-vs-actual.tsx for a button/link to it — not in scope here since
+ * those files weren't shared, grep the route string to find it).
+ *
+ * [RESTORED — this pass] The per-account track/untrack Switch. The
+ * uploaded version of this file had it removed ("[REMOVED] handleToggle()
+ * — was wired to the per-account Switch below, which is also removed for
+ * now"), with is_active/setAccountActive left in place unused. This
+ * restores the UI half — the backend half (accounts.is_active,
+ * setAccountActive() in src/lib/api/accounts.ts) already existed and is
+ * unchanged.
+ *
+ * [SCOPE — deliberately not done here, same gap accounts.ts's own
+ * docblock already flagged] Untracking an account here only changes its
+ * is_active flag. Nothing yet reads that flag on the way back out —
+ * fetchTransactions() (src/lib/api/transactions.ts) and the score
+ * calculation queries (packages/core/src/scoring/*) still include every
+ * account regardless of is_active. That's the next piece, not this one:
+ * this pass is "give the user a working toggle," not "make every read
+ * path respect it." Flagging clearly so this isn't mistaken for done.
+ *
+ * [SCOPE — also not done here] The "new account detected, review it"
+ * prompt discussed early on (a needs_review flag on first sight of an
+ * account) needs a small migration this pass doesn't add. This screen
+ * currently shows every account with its current tracked state — a
+ * newly-detected account just shows up here already tracked (is_active
+ * defaults true on insert, per resolveAccountId() in transactions.ts),
+ * with no separate "new" callout. Worth building next if wanted.
+ *
+ * [FIX — this pass] Removed the eager resolveCashAccountId() call from
+ * loadAccounts() — see that function's comment. Cash now only appears
+ * in this list once it's genuinely been used at least once via manual
+ * transaction entry, not just because this screen was opened.
+ */
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Switch, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Rect, Polyline } from 'react-native-svg';
 import { useCallback, useEffect, useState } from 'react';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
-// [CHANGE] setAccountActive no longer imported — the track/untrack toggle
-// is removed for now (see AccountsTab below). The function itself is left
-// in place in accounts.ts, unused, so re-adding a toggle later doesn't
-// need the backend piece rebuilt.
-import { fetchAccounts, resolveCashAccountId, type Account } from '@/lib/api/accounts';
+import { fetchAccounts, setAccountActive, type Account } from '@/lib/api/accounts';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -31,9 +65,6 @@ function FileIcon() {
   );
 }
 
-// [ADD] Labels for the account-tracking section below — mirrors
-// accounts_account_type_check's allowed values exactly (see the
-// migration run this session that added 'cash' to that constraint).
 const ACCOUNT_TYPE_LABELS: Record<Account['account_type'], string> = {
   bank: 'Bank Account',
   credit_card: 'Credit Card',
@@ -49,50 +80,45 @@ const ACCOUNT_TYPE_LABELS: Record<Account['account_type'], string> = {
   cash: 'Cash',
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
-// Shows data sources that feed the transactions table only:
-//   • Bank SMS (live, Android)
-//   • Email Forwarding (live, all platforms)
-//   • Bank PDF statement (upload)
-//   • CAMS / NSDL CAS PDF (upload — SIP & lumpsum rows → transactions)
-//
-// EPF, NPS, PPF/FD, Insurance → Modules → Data Inputs (balance-only, no txn rows)
-//
-// [ADD] Second concern added this session, below the data-source cards:
-// the actual list of accounts already detected (via SMS/email/PDF
-// parsing) or added manually (Cash), each with a track/untrack toggle
-// (accounts.is_active — see src/lib/api/accounts.ts's docblock for the
-// full reasoning). Deliberately kept in this same file rather than a
-// separate screen — "Accounts" already covers both "how do I connect an
-// account" (above) and "which connected accounts do I actually want
-// tracked" (below); splitting them into two screens would just make the
-// same concept harder to find. Untracking only affects FUTURE
-// transactions — no read path (Feed/History/scores) filters by this flag
-// yet, that's a separate, larger change across several files.
-// [ADD] Temporary toggle — the Live Data Sources / Upload Statements cards
-// below are demo/mockup content (no onPress handlers wired up, per the
-// audit earlier this session). Hidden for now per request so the actual
-// account-tracking list is what's visible while testing, rather than
-// competing with non-functional placeholder cards. Flip back to true once
-// those cards are wired up to real functionality — nothing below was
-// deleted, just not rendered.
+// Same reasoning as the original file: data-source cards are demo/mockup
+// content with no wired onPress handlers. Kept hidden by default so the
+// account-tracking list is the thing actually visible. Flip to true once
+// those cards are wired up to real functionality.
 const SHOW_DATA_SOURCE_CARDS = false;
 
-export default function AccountsTab() {
+export default function AccountsScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [accountsError, setAccountsError] = useState<string | null>(null);
+  // Per-account id set for "toggle request in flight" — disables that row's
+  // Switch while the write is happening, so a slow network can't let the
+  // user fire a second toggle before the first one lands.
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
 
   const loadAccounts = useCallback(async () => {
     setLoadingAccounts(true);
     setAccountsError(null);
     try {
-      // Ensures Cash always appears in this list, even before the user's
-      // ever made a manual cash entry — avoids "where did this come from"
-      // confusion later.
-      await resolveCashAccountId();
+      // [FIX — this pass] No longer calls resolveCashAccountId() here.
+      // That eagerly created a Cash account row every time this screen
+      // was opened, regardless of whether the user had ever actually
+      // used Cash — see app/(app)/transactions/add.tsx's matching fix.
+      // Cash now only appears here once it's been genuinely used at
+      // least once (created lazily, at manual-transaction submit time).
       const rows = await fetchAccounts();
-      setAccounts(rows);
+      // [FIX — this pass] Cash is deliberately excluded from this list.
+      // Per product decision: Cash is just a payment-mode tag a user can
+      // attach to a manual transaction, not a real trackable account —
+      // there's no institution, no balance, nothing meaningful to
+      // track/untrack about it, so it has no business cluttering the
+      // Accounts management screen. This applies unconditionally,
+      // regardless of whether a Cash row exists in the database yet (it
+      // gets created lazily on first manual Cash entry — see add.tsx —
+      // but even once it exists, it stays hidden here). Filtered at
+      // display time only; fetchAccounts() itself is untouched since
+      // other callers (add.tsx's own Cash-detection check) still need
+      // the real Cash row back.
+      setAccounts(rows.filter((a) => a.account_type !== 'cash'));
     } catch (e) {
       setAccountsError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -102,19 +128,40 @@ export default function AccountsTab() {
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
-  // [REMOVED] handleToggle() — was wired to the per-account Switch below,
-  // which is also removed for now (see the "Your Accounts" section render).
+  async function handleToggle(account: Account, nextValue: boolean) {
+    // Optimistic update — flip it in local state immediately so the
+    // Switch feels responsive, then confirm against the backend. On
+    // failure, revert and surface the error rather than leaving the UI
+    // showing a state that was never actually saved.
+    setAccounts(prev => prev.map(a => a.id === account.id ? { ...a, is_active: nextValue } : a));
+    setTogglingIds(prev => new Set(prev).add(account.id));
+    try {
+      await setAccountActive(account.id, nextValue);
+    } catch (e) {
+      setAccounts(prev => prev.map(a => a.id === account.id ? { ...a, is_active: account.is_active } : a));
+      Alert.alert('Couldn\u2019t update', e instanceof Error ? e.message : String(e));
+    } finally {
+      setTogglingIds(prev => {
+        const next = new Set(prev);
+        next.delete(account.id);
+        return next;
+      });
+    }
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
+      <View style={s.header}>
+        <Text style={s.title}>Accounts</Text>
+        <Text style={s.subtitle}>Manage which accounts feed your transactions and score</Text>
+      </View>
+
       <ScrollView contentContainerStyle={s.wrap} showsVerticalScrollIndicator={false}>
 
       {SHOW_DATA_SOURCE_CARDS && (
       <>
-      {/* ── Live sources ── */}
       <Text style={s.sectionLabel}>Live Data Sources</Text>
 
-      {/* Bank SMS */}
       <View style={s.card}>
         <View style={s.cardHead}>
           <Text style={s.cardTitle}>Bank SMS</Text>
@@ -123,27 +170,10 @@ export default function AccountsTab() {
           </View>
         </View>
         <Text style={s.cardDesc}>
-          Parses bank SMS every 30 min and on app open. Covers 40+ Indian banks —
-          UPI, NEFT, card swipes, ATM, EMI debits.
+          Parses bank SMS automatically — on app open, and every hour in the background.
         </Text>
-        <View style={s.steps}>
-          {[
-            'Open Pileap Android app',
-            'Settings → Data Sources → Enable SMS',
-            'Parsing begins automatically',
-          ].map((step, i) => (
-            <View key={i} style={s.stepRow}>
-              <Text style={s.stepNum}>{i + 1}</Text>
-              <Text style={s.stepText}>{step}</Text>
-            </View>
-          ))}
-        </View>
-        <TouchableOpacity style={s.btnPrimary} activeOpacity={0.8}>
-          <Text style={s.btnPrimaryText}>Enable SMS →</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Email Forwarding */}
       <View style={s.card}>
         <View style={s.cardHead}>
           <Text style={s.cardTitle}>Email Forwarding</Text>
@@ -155,32 +185,11 @@ export default function AccountsTab() {
           Forward bank emails to parse@pileap.com. Captures statements, SIP
           confirmations, CC bills, and EMI receipts.
         </Text>
-        <View style={s.steps}>
-          {[
-            'Open your bank email account settings',
-            'Add forwarding rule → parse@pileap.com',
-            'All future statements parse automatically',
-          ].map((step, i) => (
-            <View key={i} style={s.stepRow}>
-              <Text style={s.stepNum}>{i + 1}</Text>
-              <Text style={s.stepText}>{step}</Text>
-            </View>
-          ))}
-        </View>
-        <TouchableOpacity style={s.btnGhost} activeOpacity={0.8}>
-          <Text style={s.btnGhostText}>Copy email address →</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ── Upload: only docs that generate transaction rows ── */}
       <Text style={[s.sectionLabel, { marginTop: spacing.lg }]}>
         Upload Past Statements
       </Text>
-      <Text style={s.sectionSub}>
-        Only documents that generate transaction rows. EPF, NPS, PPF/FD, and
-        Insurance are balance inputs — add them under Modules → Data Inputs.
-      </Text>
-
       <View style={s.uploadRow}>
         <View style={s.uploadCard}>
           <View style={[s.uploadIcon, { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
@@ -189,7 +198,6 @@ export default function AccountsTab() {
           <Text style={s.uploadTitle}>Bank PDF Statement</Text>
           <Text style={s.uploadDesc}>All major banks · debit/credit rows</Text>
         </View>
-
         <View style={s.uploadCard}>
           <View style={[s.uploadIcon, { backgroundColor: 'rgba(124,58,237,0.1)' }]}>
             <FileIcon />
@@ -198,19 +206,12 @@ export default function AccountsTab() {
           <Text style={s.uploadDesc}>MF portfolio · SIP & lumpsum rows</Text>
         </View>
       </View>
-
-      <TouchableOpacity style={[s.btnPrimary, { marginTop: spacing.sm }]} activeOpacity={0.8}>
-        <Text style={s.btnPrimaryText}>Upload Statements →</Text>
-      </TouchableOpacity>
       </>
       )}
 
-      {/* ── [CHANGE] Your Accounts — now display-only, no track/untrack
-          toggle for now (removed per request). Was: "Turn an account off
-          if you don't want its future transactions tracked..." */}
       <Text style={[s.sectionLabel, { marginTop: spacing.lg }]}>Your Accounts</Text>
       <Text style={s.sectionSub}>
-        Accounts detected from your transactions.
+        Turn an account off if you don't want its future transactions tracked or counted toward your score. Past transactions already recorded aren't affected.
       </Text>
 
       {accountsError && <Text style={s.accountsErrorText}>{accountsError}</Text>}
@@ -231,6 +232,13 @@ export default function AccountsTab() {
                 {item.account_number_masked ? ` · ${item.account_number_masked}` : ''}
               </Text>
             </View>
+            <Switch
+              value={item.is_active ?? true}
+              onValueChange={(next) => handleToggle(item, next)}
+              disabled={togglingIds.has(item.id)}
+              trackColor={{ false: colors.border, true: colors.brand }}
+              thumbColor={colors.white}
+            />
           </View>
         ))
       )}
@@ -244,6 +252,9 @@ export default function AccountsTab() {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
+  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.dark },
+  subtitle: { fontSize: fontSize.sm, color: colors.muted, marginTop: 2 },
   wrap: { width: '100%', padding: spacing.md, paddingBottom: spacing.xl },
 
   sectionLabel: {
@@ -286,7 +297,6 @@ const s = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.muted,
     lineHeight: 17,
-    marginBottom: spacing.md,
   },
 
   badge: {
@@ -297,48 +307,6 @@ const s = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     fontWeight: fontWeight.semibold,
-  },
-
-  steps: { gap: 6, marginBottom: spacing.md },
-  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  stepNum: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    color: colors.brand,
-    width: 14,
-  },
-  stepText: {
-    fontSize: fontSize.xs,
-    color: colors.mid,
-    flex: 1,
-    lineHeight: 17,
-  },
-
-  btnPrimary: {
-    backgroundColor: colors.brand,
-    paddingVertical: 10,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  btnPrimaryText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.white,
-  },
-  btnGhost: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.brand,
-    paddingVertical: 10,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  btnGhostText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.brand,
   },
 
   uploadRow: {
@@ -375,9 +343,6 @@ const s = StyleSheet.create({
     lineHeight: 14,
   },
 
-  // [ADD] "Your Accounts" section styles — deliberately reuse the same
-  // card/badge/sectionLabel language above rather than introducing a
-  // second visual style in the same screen.
   accountRow: {
     flexDirection: 'row',
     alignItems: 'center',

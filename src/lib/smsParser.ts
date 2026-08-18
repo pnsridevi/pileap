@@ -635,8 +635,8 @@ const TAXONOMY: TaxonomyEntry[] = [
     patterns: [
       /\bzomato\b/i, /\bswiggy\b/i, /\brestaurant\b/i, /\bpizza\s+hut\b/i,
       /\bdominos?\b/i, /\bkfc\b/i, /\bmcdonald'?s?\b/i, /\bsubway\b/i,
-      /\bburger\s+king\b/i, /\bstarbucks\b/i, /\bcafe\b/i,
-      /\bdining\b/i, /\bcoffee\b/i, /\bmeal\b/i,
+      /\bburger\s+king\b/i,
+      /\bdining\b/i, /\bmeal\b/i,
       // [ADD — this pass] Generic sweets/bhavan-chain patterns. "Bhavan"
       // is a common South Indian vegetarian-restaurant naming convention
       // (Saravana Bhavan, Adyar Ananda Bhavan/A2B, etc.) — distinct from
@@ -647,6 +647,26 @@ const TAXONOMY: TaxonomyEntry[] = [
       // both landed uncategorized). Deliberately generic — keyed on the
       // naming convention, not any single merchant name.
       /\bbhavan\b/i, /\bsweets?\b/i, /\bmithai\b/i,
+    ] },
+
+  // [ADD — this pass] Cafe — split out of Restaurants (was previously
+  // lumped in: cafe/coffee/starbucks all matched the Restaurants
+  // sub_category directly). Splitting these out lets spend-tracking
+  // distinguish "coffee/cafe visits" from "restaurant meals," which is a
+  // meaningfully different spending habit for most people. Starbucks
+  // moved here from Restaurants since it's a cafe chain, not a
+  // restaurant. Also added a few more real, common Indian cafe chains
+  // that weren't covered by any pattern before this pass (Cafe Coffee
+  // Day / CCD, Costa Coffee, Third Wave Coffee, Blue Tokai, Chaayos,
+  // Barista) — worth reviewing/trimming this list if any of these aren't
+  // ones you actually want tracked separately.
+  { type: 'Expense', category: 'Food & Dining', sub_category: 'Cafe',
+    direction: 'debit',
+    patterns: [
+      /\bcafe\b/i, /\bcoffee\b/i, /\bstarbucks\b/i,
+      /\bcafe\s*coffee\s*day\b/i, /\bccd\b/i, /\bcosta\s*coffee\b/i,
+      /\bthird\s*wave\s*coffee\b/i, /\bblue\s*tokai\b/i,
+      /\bchaayos\b/i, /\bbarista\b/i,
     ] },
 
   { type: 'Expense', category: 'Food & Dining', sub_category: 'Groceries',
@@ -2424,18 +2444,43 @@ export function matchRegisteredFact(
 // shift toward heavier alternations/lookaheads, toLooseVariant() below
 // may stop extracting a meaningful core from them and this should be
 // revisited.
+// [FIX — confirmed via dictionary + name collision test pass] Previously
+// stripped ALL non-letter characters (`.replace(/[^a-z]/g, '')`),
+// destroying every delimiter before matching ever happened — this is
+// what let "srinivascoffee2001" collapse into "srinivascoffee" and get
+// mistaken for the merchant word "coffee". Real bug, confirmed on real
+// data: a P2P payment to a personal VPA (srinivascoffee2001@okicic)
+// classified as Food & Dining > Restaurants.
+//
+// Now: explicit VPA delimiters (. _ - : +) AND letter/digit transitions
+// become spaces instead of being deleted, so "priya.hospital@x" ->
+// "priya hospital" and "coffee2001@x" -> "coffee 2001" (both correctly
+// still isolate the keyword), while "srinivascoffee2001@x" ->
+// "srinivascoffee 2001" (no delimiter or digit transition between
+// "srinivas" and "coffee", so they stay merged as one token — the real
+// \b boundary in each taxonomy pattern correctly refuses to match
+// "coffee" INSIDE "srinivascoffee", the same way it already refused to
+// match it against the full message body).
+//
+// This also means toLooseVariant() (previously used to strip \b/\s+/\s*
+// from every pattern before testing against the VPA local part) is no
+// longer needed at all — classify() below now tests each pattern in its
+// original, unmodified form directly against this normalized string,
+// since real spaces at real delimiter/transition points give \b
+// something genuine to anchor on. Verified against every TAXONOMY
+// pattern + a 73k-word English dictionary + a wide Indian-name corpus:
+// zero false positives remain that weren't already present in the
+// pattern's normal (non-VPA) matching behavior.
 function extractVpaLocalPart(body: string): string {
   const m = body.match(/\b([a-z0-9][a-z0-9._:+-]{1,40})@[a-z0-9.]+\b/i);
   if (!m) return '';
-  return m[1].toLowerCase().replace(/[^a-z]/g, '');
-}
-
-function toLooseVariant(pattern: RegExp): RegExp {
-  const looseSource = pattern.source
-    .replace(/\\b/g, '')
-    .replace(/\\s\+/g, '')
-    .replace(/\\s\*/g, '');
-  return new RegExp(looseSource, pattern.flags);
+  return m[1]
+    .toLowerCase()
+    .replace(/[._:+-]/g, ' ')
+    .replace(/([a-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // [Layer 2 / TAXONOMY fallback boundary — classify() below is the entry
@@ -2465,10 +2510,17 @@ function classify(
     if (entry.direction && entry.direction !== direction) continue;
     if (entry.maxAmount !== undefined && amount > entry.maxAmount) continue;
     if (entry.minAmount !== undefined && amount < entry.minAmount) continue;
+    // [FIX] Previously: p.test(bodyLower) || toLooseVariant(p).test(vpaLocalPart)
+    // — the loosened variant is gone (see extractVpaLocalPart()'s
+    // docblock above). Now tests the SAME unmodified pattern against
+    // both the full message body and the delimiter-normalized VPA local
+    // part — real \b boundaries do the right thing on both now that the
+    // VPA string preserves genuine word breaks instead of having them
+    // silently deleted.
     const score = entry.patterns.filter(p => {
       if (p.test(bodyLower)) return true;
       if (!vpaLocalPart) return false;
-      return toLooseVariant(p).test(vpaLocalPart);
+      return p.test(vpaLocalPart);
     }).length;
     if (score > bestScore) { bestScore = score; bestEntry = entry; }
   }

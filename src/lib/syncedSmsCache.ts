@@ -1,11 +1,14 @@
 /**
  * src/lib/syncedSmsCache.ts
  *
- * Device-local cache of SMS raw_sms_id values already successfully synced
- * to Supabase for the current user. Purpose: let ingestParsedMessages()
- * skip already-synced messages BEFORE they ever reach insertTransaction(),
- * so a crash/force-close mid-sync followed by a retry doesn't re-insert
- * and re-flag everything that already went through.
+ * Device-local cache of already-synced SMS, keyed by a composite of
+ * raw_sms_id + a hash of the message's own text (see buildSyncedSmsCacheKey
+ * below) rather than raw_sms_id alone — a bare ID isn't a stable identity
+ * for a message, since the OS can recycle a deleted message's ID for an
+ * unrelated new one. Purpose: let ingestParsedMessages() skip already-
+ * synced messages BEFORE they ever reach insertTransaction(), so a
+ * crash/force-close mid-sync followed by a retry doesn't re-insert and
+ * re-flag everything that already went through.
  *
  * DELIBERATELY device-local, not a new `transactions.raw_sms_id` column —
  * see the discussion this was built from. What that choice buys and costs:
@@ -40,6 +43,38 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function storageKey(userId: string): string {
   return `synced_sms_ids:${userId}`;
+}
+
+// [ADD] Small deterministic string hash (FNV-1a, 32-bit) — not a security
+// primitive, just enough entropy that two genuinely different message
+// bodies essentially never collide. Kept short (base-36) so composite keys
+// don't meaningfully bloat storage size vs. the bare-ID keys this replaces.
+function hashText(text: string): string {
+  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // FNV-1a 32-bit prime
+  }
+  return (hash >>> 0).toString(36);
+}
+
+// [ADD] raw_sms_id alone is not a stable identity for a message — Android's
+// SMS content provider _id is not documented as permanently non-reusable,
+// so a deleted message's ID can be recycled for an unrelated new message.
+// Pairing the ID with a hash of the message's own text means a reused ID
+// only matches the cache if the text also matches — the same safety
+// property transactions.ts's findGenuineResyncMatch() already relies on
+// server-side (raw_sms_id AND raw_text), applied locally too so the local
+// pre-filter can no longer wrongly hide a genuinely new message from that
+// server-side check before it ever runs.
+//
+// BalanceUpdate items have no raw_text field to hash (see smsParser.ts) —
+// for those, this falls back to the ID alone, same behavior as before this
+// fix. That's an accepted, narrower gap than the one being closed here: a
+// wrongly-skipped balance disclosure delays a balance refresh, not a lost
+// transaction.
+export function buildSyncedSmsCacheKey(rawSmsId: string, rawText?: string | null): string {
+  return rawText ? `${rawSmsId}:${hashText(rawText)}` : rawSmsId;
 }
 
 export async function getSyncedSmsIds(userId: string): Promise<Set<string>> {

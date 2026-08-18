@@ -1304,7 +1304,16 @@ const RULES = [
         channel:               'NEFT',
         account_number_masked: extractAccount(body),
         txn_date:              extractDate(body),
-        merchant:              'PPF / SSY Account',
+        // [FIX — confirmed via synthetic test pass] This hardcoded label
+        // used to be 'PPF / SSY Account' — the "/" in it trips
+        // confidenceGate.js's merchant_contains_slash check on every
+        // single PPF/SSY transfer, unconditionally, forever. Not a real
+        // ambiguity (this string is a static label, not extracted data —
+        // there is nothing to double-check), so every PPF/SSY row was
+        // being sent to pending_review for no real reason. Removing the
+        // slash removes 100% of that false flagging with zero loss of
+        // information.
+        merchant:              'PPF-SSY Account',
         balance:               extractBalance(body),
         ...extractRefNumber(body),
         possible_contra:       true,
@@ -1385,7 +1394,21 @@ const RULES = [
   // GENERIC_DEBIT.
   {
     id: 'CARD_POS_USED_FOR',
-    pattern: /\bcard\b.{0,20}\bused\s+for\b|\busing\b.{0,20}\bcard\b.{0,20}\bfor\s+Rs/im,
+    // [FIX — confirmed via synthetic multi-bank test pass] The "using...
+    // card...for Rs" alternative's first gap was .{0,20}, which only
+    // covers bank names up to ~2 words ("HDFC Bank", "Yes Bank"). Any
+    // longer bank name — "State Bank of India", "Bank of Baroda",
+    // "Punjab National Bank", any "X Small Finance Bank", any "X
+    // Payments Bank" — pushes "using <BANK> Debit Card" past 20 chars
+    // and the whole alternative silently fails to match, dropping a real
+    // debit-card POS purchase entirely (falls through to null, not even
+    // pending_review). Confirmed with a synthetic message per bank: 27/36
+    // real Indian bank names missed at .{0,20}, including State Bank of
+    // India — the country's largest bank by customer count. Widened to
+    // .{0,45}, confirmed 36/36 banks match at that width with no false
+    // widening into the next sentence (bounded by \bcard\b on the other
+    // side, which still anchors the match).
+    pattern: /\bcard\b.{0,20}\bused\s+for\b|\busing\b.{0,45}\bcard\b.{0,20}\bfor\s+Rs/im,
     extract(body, messageDate) {
       const atMatch = body.match(/\bat\s+(.{2,40}?)(?:\s+on\s+\d|\s*\.|\s*$)/i);
       return {

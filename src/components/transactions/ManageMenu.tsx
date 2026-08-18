@@ -2,16 +2,22 @@
  * src/components/transactions/ManageMenu.tsx
  *
  * Small "⋯" icon + dropdown, placed next to the Feed/History SubTabs
- * control. This is the actual answer to "where do Custom Categories and
- * Accounts show up" — those two screens (plus Budget vs Actual) exist as
- * routes but had NO way to navigate to them from the UI before this.
- * Feed/History stay as the primary segmented tabs (high-frequency use);
- * everything else sits one tap deeper here (occasional, settings-style
- * screens) — see the design discussion this was decided from.
+ * control. Custom Categories exists as a route with no other way to
+ * navigate to it from the UI — this menu is that entry point.
  *
  * Shared by both index.tsx (Feed) and history.tsx (History) rather than
  * duplicated in each — same menu, same destinations, regardless of which
  * sub-tab it's opened from.
+ *
+ * [REMOVED — this pass] "Accounts" — that screen moved from
+ * app/(app)/transactions/accounts.tsx to app/(app)/profile/accounts.tsx
+ * (account tracking is a settings-style concern, not a
+ * transactions-tab one — see the design discussion this was decided
+ * from). It's now reachable from the Profile tab directly, so it doesn't
+ * need a second entry point buried in this menu too. If a quick shortcut
+ * from here is ever wanted again, re-add with path
+ * '/(app)/profile/accounts' — not '/(app)/transactions/accounts', which
+ * no longer exists.
  */
 import { useState } from 'react';
 import { Modal, Pressable, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
@@ -24,7 +30,6 @@ const MENU_ITEMS = [
   // from the menu for now so it doesn't link to an unfinished stub.
   // Re-add once that screen has real content:
   // { label: 'Budget vs Actual', path: '/(app)/transactions/budget-vs-actual' as const },
-  { label: 'Accounts', path: '/(app)/transactions/accounts' as const },
 ];
 
 export function ManageMenu() {

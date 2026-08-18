@@ -1,21 +1,36 @@
 /**
  * app/(app)/_layout.tsx
  *
- * [CHANGE — temporary, per testing request] Report Card, Modules, and
- * Goals tabs are hidden from the tab bar for now via `options.href: null`.
- * This is the correct Expo Router way to hide a tab: commenting out the
- * <Tabs.Screen> entry does NOT work, because the tab bar is generated
- * from every file present in app/(app)/ regardless of what's declared
- * here — the entry only customizes icon/title/order IF the route shows.
- * `href: null` explicitly excludes it from the tab bar while keeping the
- * route and screen fully intact (so any internal links to it still work).
- * To restore these tabs later, just remove the `href: null` line from
- * each entry below.
+ * [CHANGE — this pass] "Test SMS" tab renamed to "Sync", pointing at the
+ * new app/(app)/sync.tsx (replaces test-sms.tsx — delete that file after
+ * this lands). Icon swapped for a refresh-style icon matching the new
+ * purpose; the flask icon is gone since this is no longer a test screen.
+ *
+ * [ADD — this pass] Automatic sync wiring:
+ *   - useEffect below calls syncRecentSmsMessages() once on mount, i.e.
+ *     on every app open — this is the "guaranteed freshness when the
+ *     user has the app open" half of automatic sync (see smsSync.ts's
+ *     docblock).
+ *   - registerBackgroundSyncAsync() registers the hourly background task
+ *     (see backgroundSync.ts for what it does and its honest limits on
+ *     Android). Registration itself is idempotent and safe to call on
+ *     every launch.
+ *   - Both are fire-and-forget here — a failure (not signed in yet,
+ *     permission not granted, transient network error) must not block
+ *     the tab bar from rendering. Errors are swallowed with a console
+ *     warning; syncRecentSmsMessages() itself already no-ops cleanly if
+ *     there's no signed-in user.
+ *
+ * [KEPT] The href: null pattern for hiding Report Card/Modules/Goals
+ * tabs, and the ordering comments below, are unchanged from before.
  */
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { colors } from '@/constants/theme';
 import Svg, { Path, Polyline, Line, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { syncRecentSmsMessages } from '@/lib/services/smsSync';
+import { registerBackgroundSyncAsync } from '@/lib/services/backgroundSync';
 
 function ReportCardIcon({ color }: { color: string }) {
   return (
@@ -68,21 +83,32 @@ function ProfileIcon({ color }: { color: string }) {
   );
 }
 
-// [ADD] Simple flask/test icon — no existing icon in this file fit "test
-// harness," so a minimal new one, matching the same 22x22/stroke-only
-// style as the others above.
-function TestSmsIcon({ color }: { color: string }) {
+// [REPLACED] TestSmsIcon -> SyncIcon — simple refresh/circular-arrows
+// glyph, matching the same 22x22/stroke-only style as the others above.
+function SyncIcon({ color }: { color: string }) {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
-      <Path d="M9 2v6L4 20a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L15 8V2" />
-      <Line x1="9" y1="2" x2="15" y2="2" />
-      <Line x1="7" y1="15" x2="17" y2="15" />
+      <Polyline points="23 4 23 10 17 10" />
+      <Polyline points="1 20 1 14 7 14" />
+      <Path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
     </Svg>
   );
 }
 
 export default function AppLayout() {
   const insets = useSafeAreaInsets();
+
+  // [ADD] On-app-open sync + background-task registration. Runs once per
+  // app mount, deliberately not tied to any tab being visible.
+  useEffect(() => {
+    syncRecentSmsMessages().catch((e) => {
+      console.warn('On-open SMS sync failed:', e instanceof Error ? e.message : e);
+    });
+    registerBackgroundSyncAsync().catch((e) => {
+      console.warn('Background sync registration failed:', e instanceof Error ? e.message : e);
+    });
+  }, []);
+
   return (
     <Tabs
       screenOptions={{
@@ -103,20 +129,14 @@ export default function AppLayout() {
         },
       }}
     >
-      {/* [ADD] Test SMS tab — temporary, for easy access during testing.
-          [ORDER — per request] Test SMS first, then Transactions, then
-          Profile. Report Card / Modules / Goals are hidden below via
-          href: null but remain first in file order per original file. */}
+      {/* [RENAMED] test-sms -> sync. Route file is now app/(app)/sync.tsx. */}
       <Tabs.Screen
-        name="test-sms"
+        name="sync"
         options={{
-          title: 'Test SMS',
-          tabBarIcon: ({ color }) => <TestSmsIcon color={color} />,
+          title: 'Sync',
+          tabBarIcon: ({ color }) => <SyncIcon color={color} />,
         }}
       />
-      {/* [HIDDEN — temporary, testing request] href: null removes this
-          from the tab bar while keeping the route/screen fully working.
-          Remove the href line to restore it to the tab bar. */}
       <Tabs.Screen
         name="report-card"
         options={{
@@ -148,8 +168,6 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <GoalsIcon color={color} />,
         }}
       />
-      {/* [KEPT — per request] Profile has the sign-out option, needed
-          during testing even though other tabs are hidden. */}
       <Tabs.Screen
         name="profile"
         options={{

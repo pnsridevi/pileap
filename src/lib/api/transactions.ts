@@ -117,7 +117,7 @@ import { isBalanceUpdate, matchCustomCategory, matchRegisteredFact, normaliseMer
 // given custom category / registered fact existed.
 import { fetchCustomCategories } from './customCategories';
 import { fetchActiveRegisteredFacts } from './registeredFacts';
-import { getSyncedSmsIds, markSmsIdsSynced } from '../syncedSmsCache';
+import { getSyncedSmsIds, markSmsIdsSynced, buildSyncedSmsCacheKey } from '../syncedSmsCache';
 
 // [CHANGED] Real login is now in place (phone/OTP via Supabase Auth). Every
 // function that used to read the CURRENT_USER_ID constant now calls this
@@ -137,6 +137,32 @@ async function getCurrentUserId(): Promise<string> {
 
 // ─── Account resolution ───────────────────────────────────────────────────────
 
+// [KEPT — do not change without reading this] resolveAccountId() matches
+// on account_number_masked ALONE, deliberately not paired with
+// institution_name, even though that means two different real banks
+// sharing the same last-4 digits will collapse onto one account row.
+//
+// This was tried and reverted (Aug 2026 test pass). Confirmed against
+// real user data: NPCI/UPI infrastructure sometimes sends a duplicate
+// notification of the exact same transaction branded under a different
+// bank's sender ID (observed: an SBI-branded "credited" SMS echoing an
+// HDFC credit, same amount/date/UPI ref_number, SBI is not an account
+// the user actually holds). findDuplicateCandidate() below is scoped by
+// .eq('account_id', accountId) — it only ever compares transactions
+// within the same account. If the echo resolved to a different account
+// (e.g. by also matching on institution_name), the exact-ref_number
+// match that gives the duplicate check its highest confidence (0.95,
+// see computeDuplicateConfidence()) would never fire, since the two rows
+// would never be compared against each other at all — the echo would
+// insert as a convincing-looking new transaction on a phantom account
+// instead of being flagged pending_review for the user to dismiss.
+//
+// Two real accounts genuinely sharing the same last-4 digits is possible
+// but rarer, and its worst case is bounded: same-date/same-amount
+// collisions still just route to pending_review for a human to sort out,
+// same as any other duplicate flag — never a silent, undetectable
+// mislabeling. That's a smaller cost than breaking the cross-bank-echo
+// case above, which is confirmed to happen in practice.
 async function resolveAccountId(
   accountNumberMasked: string | null,
   bank: string | null,
@@ -652,7 +678,18 @@ async function findGenuineResyncMatch(
     .eq('user_id', userId)
     .eq('raw_sms_id', rawSmsId)
     .eq('raw_text', rawText)
-    .eq('is_deleted', false)
+    // [FIX] Was `.eq('is_deleted', false)` — is_deleted is nullable in the
+    // actual schema (`boolean null default false`), and `is_deleted = false`
+    // does not match a row where is_deleted IS NULL. That mismatch mattered
+    // once the new (user_id, raw_sms_id, raw_text) unique index (which uses
+    // the NULL-safe `is_deleted is not true`) started relying on this same
+    // function to resolve a caught unique-violation: for a NULL-is_deleted
+    // row, the index would correctly block the duplicate insert, but this
+    // lookup would fail to find the existing row afterward and the caller
+    // would rethrow instead of returning the graceful "already existed"
+    // result. `.not('is_deleted', 'is', true)` matches is_deleted = false
+    // OR is_deleted IS NULL, mirroring the index exactly.
+    .not('is_deleted', 'is', true)
     .limit(1)
     .maybeSingle();
 
@@ -960,8 +997,42 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
     parse_failure:         isProvisionalCredit ? 'awaiting_bank_confirmation' : txn.parse_failure,
   }).select('id').single();
 
-  if (error) throw error;
-  return { id: data.id, skipPairing: isDefinitionalContra };
+  if (error) {
+    // [ADD] Unique-violation on the (user_id, raw_sms_id, raw_text) DB
+    // constraint (see the migration adding it) — this is exactly the case
+    // findGenuineResyncMatch() above is meant to catch, but that check can
+    // lose a genuine race against a second concurrent sync (e.g. a fast
+    // double-tap on "Sync Now", or the hourly background task overlapping
+    // a foreground one) that inserts its own row in the gap between this
+    // function's pre-check and this INSERT. The DB constraint is what
+    // makes that race actually impossible rather than just unlikely; this
+    // catch is what turns the resulting error into the same graceful
+    // "already existed" outcome the pre-check gives when it wins the race
+    // cleanly, instead of surfacing a raw constraint-violation error.
+    if (error.code === '23505' && txn.raw_sms_id && txn.raw_text) {
+      const existingId = await findGenuineResyncMatch(userId, txn.raw_sms_id, txn.raw_text);
+      if (existingId) {
+        return { id: existingId, skipPairing: true, alreadyExisted: true };
+      }
+    }
+    throw error;
+  }
+  // [FIX] Previously only isDefinitionalContra skipped contra pairing.
+  // A row flagged as a possible duplicate (duplicateCandidate truthy,
+  // status forced to pending_review above) was still eligible to run
+  // through runContraDetection() afterward — meaning a duplicate/echo
+  // row could win a Tier-1 contra match against a genuine transfer leg
+  // before the REAL transaction got a chance to, silently flipping the
+  // duplicate's status to 'approved' (applyContraMatch's Tier-1 path
+  // sets status but never touches possible_duplicate_of) and hiding it
+  // from the pending_review queue the user relies on to reject it.
+  // Confirmed on real data: an SBI-branded echo of an HDFC credit (see
+  // resolveAccountId's comment above) shares its ref_number with a
+  // genuine PNB-to-HDFC self-transfer's UPI ref — exactly the shape that
+  // lets the echo out-race the real credit for the contra match. A row
+  // already suspected to be a duplicate should never be treated as a
+  // legitimate transfer leg in the first place.
+  return { id: data.id, skipPairing: isDefinitionalContra || !!duplicateCandidate };
 }
 
 // ─── Contra transaction detection (arch doc Section 5.7 — 3-tier model) ──────
@@ -1310,8 +1381,19 @@ export async function ingestParsedMessages(
   // see syncedSmsCache.ts for exactly what this does and doesn't protect
   // against. This is now the ONLY pre-filter (see removal note above) —
   // applied directly to `items`, not to a date-filtered subset.
+  // [FIX] Was `syncedIds.has(item.raw_sms_id)` — bare ID alone. A deleted
+  // message's raw_sms_id can be recycled by the OS for an unrelated new
+  // message; matching on ID alone would wrongly treat that new, real
+  // message as already-synced and filter it out here, before it ever
+  // reaches insertTransaction()'s findGenuineResyncMatch() — the one check
+  // that actually verifies text too. Composite key closes that gap at the
+  // same point it was opening it. See syncedSmsCache.ts's
+  // buildSyncedSmsCacheKey() docblock for the BalanceUpdate fallback.
   const syncedIds = await getSyncedSmsIds(userId);
-  const itemsToProcess = items.filter((item) => !syncedIds.has(item.raw_sms_id));
+  const itemsToProcess = items.filter((item) => {
+    const rawText = isBalanceUpdate(item) ? null : item.raw_text;
+    return !syncedIds.has(buildSyncedSmsCacheKey(item.raw_sms_id, rawText));
+  });
   result.skippedAlreadySynced = items.length - itemsToProcess.length;
 
   // [CHANGED — this pass] Chunked instead of one continuous loop over every
@@ -1365,7 +1447,12 @@ export async function ingestParsedMessages(
         // [ADD] Only mark as synced on genuine success — an item that
         // threw must NOT be cached, or a persistently-failing message
         // (e.g. a real server error) would silently never be retried.
-        succeededIdsThisChunk.push(item.raw_sms_id);
+        // [FIX] Composite key (see the pre-filter above) — must match
+        // exactly what the pre-filter checks against, or a recycled ID
+        // could still slip past on a LATER run even after this fix.
+        succeededIdsThisChunk.push(
+          buildSyncedSmsCacheKey(item.raw_sms_id, isBalanceUpdate(item) ? null : item.raw_text)
+        );
       } catch (e) {
         result.errors.push({
           raw_sms_id: item.raw_sms_id,
@@ -1395,6 +1482,34 @@ export async function ingestParsedMessages(
 
 // ─── Fetch for the Transactions tab ───────────────────────────────────────────
 
+// [ADD] Ids of accounts the user has turned tracking off for. Shared by
+// fetchTransactions() and fetchNeedsReviewCount() below — both need to
+// exclude the same set, or the review-count badge and the feed it's
+// meant to describe would disagree (badge counts an untracked account's
+// pending_review row, feed hides it — a visible, confusing mismatch).
+//
+// Deliberately a separate query + client-side-built filter string
+// (`.or('account_id.is.null,account_id.not.in.(...)')`), NOT a `!inner`
+// join filtered on `accounts.is_active`. An inner join would drop every
+// row with a null account_id entirely (no matching account row to join
+// against), which is wrong — an unresolved account was never
+// "untracked," it's simply unknown, and those rows must stay visible.
+// This also sidesteps the same NULL-comparison pitfall already
+// documented elsewhere in this file (parse_failure, account_id):
+// .not('account_id', 'in', ids) ALONE would silently exclude every
+// null-account_id row too, since NULL NOT IN (...) evaluates to
+// NULL/exclude in Postgres, not TRUE — the explicit `account_id.is.null`
+// branch in the .or() is what protects those rows.
+async function fetchInactiveAccountIds(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_active', false);
+  if (error) throw error;
+  return (data ?? []).map(r => r.id);
+}
+
 export interface TransactionFilters {
   // [FIX] Added 'haiku_suggested' — a real, live status value in the DB
   // CHECK constraint (transactions_status_check) that was absent from
@@ -1417,6 +1532,12 @@ export interface TransactionFilters {
 export async function fetchTransactions(filters: TransactionFilters = {}) {
   const { status, statuses, category, page = 0, pageSize = 20 } = filters;
   const userId = await getCurrentUserId();
+
+  // [ADD] Untracked accounts (accounts.is_active = false, toggled from
+  // the Profile > Accounts screen) are excluded from this feed — see
+  // fetchInactiveAccountIds()'s docblock above for why this is a
+  // separate query rather than a joined-column filter.
+  const inactiveAccountIds = await fetchInactiveAccountIds(userId);
 
   // [ADD] Embeds the related `accounts` row (via the account_id FK) in the
   // same query, rather than a separate fetchAccounts() call merged
@@ -1473,6 +1594,14 @@ export async function fetchTransactions(filters: TransactionFilters = {}) {
     query = query.eq('status', status);
   }
   if (category) query = query.eq('category', category);
+
+  // [ADD] Second .or() call on the same builder — PostgREST ANDs
+  // multiple .or() groups together, so this adds "AND (account is
+  // tracked or unresolved)" alongside the existing parse_failure
+  // exclusion above, it doesn't replace it.
+  if (inactiveAccountIds.length > 0) {
+    query = query.or(`account_id.is.null,account_id.not.in.(${inactiveAccountIds.join(',')})`);
+  }
 
   const { data, error, count } = await query;
   if (error) throw error;
@@ -1573,7 +1702,14 @@ export async function fetchTransactionById(id: string): Promise<Transaction | nu
 
 export async function fetchNeedsReviewCount(): Promise<number> {
   const userId = await getCurrentUserId();
-  const { count, error } = await supabase
+
+  // [ADD] Same exclusion as fetchTransactions — an untracked account's
+  // pending_review rows shouldn't inflate this badge if the feed itself
+  // won't show them; a mismatched "3 need review" badge over a 2-row
+  // list is a confusing, avoidable bug.
+  const inactiveAccountIds = await fetchInactiveAccountIds(userId);
+
+  let query = supabase
     .from('transactions')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
@@ -1589,6 +1725,12 @@ export async function fetchNeedsReviewCount(): Promise<number> {
     // user can't actually act on. Same NULL-semantics caveat applies — see
     // the comment in fetchTransactions for why this can't be a plain .neq().
     .or('parse_failure.is.null,parse_failure.neq.declined_transaction');
+
+  if (inactiveAccountIds.length > 0) {
+    query = query.or(`account_id.is.null,account_id.not.in.(${inactiveAccountIds.join(',')})`);
+  }
+
+  const { count, error } = await query;
 
   if (error) throw error;
   return count ?? 0;

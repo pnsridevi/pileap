@@ -81,7 +81,17 @@ export const TAXONOMY: Record<TxnType, CategoryDef[]> = {
     { category: 'Quick Commerce', color: '#0DA6A0',
       subCategories: ['Instant Delivery'] },
     { category: 'Food & Dining', color: '#E8590C',
-      subCategories: ['Restaurants', 'Groceries', 'Milk & Dairy'] },
+      // [ADD — this pass] 'Cafe' — mirrors smsParser.ts's TAXONOMY split
+      // (coffee/cafe/starbucks moved out of Restaurants into their own
+      // sub_category — see that file's change log). Without this entry
+      // here, a transaction the parser correctly tags sub_category:
+      // 'Cafe' would still render fine via getCategory() (that only keys
+      // off `category`, unaffected), but EditModal/add.tsx's sub-category
+      // CHIP PICKER builds its options from this array specifically — a
+      // 'Cafe' row would show with no matching chip selected, and be
+      // silently treated as a one-off custom value (isCustomSubCategory)
+      // instead of a normal, re-selectable option.
+      subCategories: ['Restaurants', 'Cafe', 'Groceries', 'Milk & Dairy'] },
     { category: 'Entertainment', color: '#D6336C',
       subCategories: ['OTT Subscriptions', 'Movies & Events'] },
     { category: 'Shopping', color: '#AE3EC9',

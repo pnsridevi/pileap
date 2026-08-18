@@ -39,9 +39,8 @@ import {
 export interface TransactionRowData {
   id: string;
   txn_date: string;           // 'YYYY-MM-DD'
-  // [FIX] Was `number`. `null` = a declined/failed-transaction placeholder
-  // (buildDiscarded in smsParser.ts — amount was never captured because the
-  // transaction itself never completed). Always positive when non-null;
+  // [FIX] Was `number`. `null` now has TWO distinct causes — see `type`
+  // below for how they're told apart. Always positive when non-null;
   // direction comes from `type`.
   amount: number | null;
   // [FIX] Added 'declined' — was 'debit' | 'credit' only, which forced
@@ -49,7 +48,17 @@ export interface TransactionRowData {
   // transaction's amount to 0, then classify it as 'credit' (null < 0 is
   // false) — rendering it as a green "+₹0.00", i.e. fake incoming money.
   // See mapTransactionToRow() below and its render branch in TransactionRow.
-  type: 'debit' | 'credit' | 'declined';
+  // [FIX] Added 'unparsed' — `amount === null` used to be treated as
+  // synonymous with a declined transaction everywhere in this component,
+  // but buildEscalated() in smsParser.ts (parse_failure: 'missing_amount'
+  // / 'unknown_direction' / 'escalated_to_haiku') ALSO produces amount:
+  // null for a completely different reason: a real transaction whose
+  // amount just couldn't be extracted from the SMS text (e.g. an
+  // unrecognized currency format). That row is not declined, and
+  // rendering it as "Declined" actively misinforms the user that money
+  // was never spent when it may well have been. `type` now distinguishes
+  // the two — see mapTransactionToRow() below for exactly how.
+  type: 'debit' | 'credit' | 'declined' | 'unparsed';
   category: string | null;
   sub_category: string | null;
   merchant: string | null;
@@ -100,16 +109,23 @@ export interface TransactionRowData {
  * display shape this component expects. Put here rather than in the DB
  * layer — this is a view concern, not a data-fetching one. */
 export function mapTransactionToRow(txn: Transaction): TransactionRowData {
-  // [FIX] txn.amount is genuinely `number | null` at runtime (declined-
-  // transaction placeholders — see the Transaction type fix in
-  // transactions.ts). Check for null BEFORE calling Math.abs()/comparing
-  // with `<`, instead of letting JS silently coerce null to 0.
-  const isDeclined = txn.amount === null;
+  // [FIX] txn.amount is genuinely `number | null` at runtime. Check for
+  // null BEFORE calling Math.abs()/comparing with `<`, instead of letting
+  // JS silently coerce null to 0.
+  // [FIX] amount === null no longer means "declined" on its own — a row
+  // from buildEscalated() (missing_amount/unknown_direction/
+  // escalated_to_haiku) also has amount: null but is a real, unparsed
+  // transaction, not a declined one. parse_failure: 'declined_transaction'
+  // is the actual signal buildDiscarded() sets ONLY for a genuine
+  // GENERIC_DECLINED match — see layer2_ruleset.js. Anything else with a
+  // null amount is unparsed, not declined.
+  const isDeclined = txn.amount === null && txn.parse_failure === 'declined_transaction';
+  const isUnparsed = txn.amount === null && !isDeclined;
   return {
     id: txn.id,
     txn_date: txn.txn_date,
-    amount: isDeclined ? null : Math.abs(txn.amount as number),
-    type: isDeclined ? 'declined' : (txn.amount as number) < 0 ? 'debit' : 'credit',
+    amount: (isDeclined || isUnparsed) ? null : Math.abs(txn.amount as number),
+    type: isDeclined ? 'declined' : isUnparsed ? 'unparsed' : (txn.amount as number) < 0 ? 'debit' : 'credit',
     category: txn.category,
     sub_category: txn.sub_category,
     merchant: txn.merchant,
@@ -411,11 +427,11 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
     ? colors.muted
     : txn.type === 'credit'
     ? colors.green
-    : txn.type === 'declined'
+    : txn.type === 'declined' || txn.type === 'unparsed'
     ? colors.muted
     : colors.dark;
 
-  const amountPrefix = txn.type === 'credit' ? '+ ' : txn.type === 'declined' ? '' : '− ';
+  const amountPrefix = txn.type === 'credit' ? '+ ' : (txn.type === 'declined' || txn.type === 'unparsed') ? '' : '− ';
 
   // [ADD] Plain-language label for resolved_from — see add_resolved_from.sql
   // and the Transaction/TransactionRowData type changes. Only ever set for
@@ -504,12 +520,18 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
 
         <View style={styles.rightCol}>
           <Text style={[styles.amount, { color: amountColor }]}>
-            {/* [FIX] Was `formatAmount(txn.amount)` unconditionally — threw
-                nothing (JS is permissive) but formatAmount(null) would have
-                produced "₹NaN" once amount could no longer silently be 0
-                from mapTransactionToRow. txn.amount is genuinely null here
-                for declined rows, so branch instead of formatting it. */}
-            {txn.amount === null ? 'Declined' : `${amountPrefix}${formatAmount(txn.amount)}`}
+            {/* [FIX] Was `txn.amount === null ? 'Declined' : ...` — treated
+                EVERY null amount as a declined transaction. A row that
+                simply failed to parse an amount (type: 'unparsed') is a
+                real transaction, not a declined one, and showing
+                "Declined" for it actively misinforms the user. Branch on
+                `type`, which now distinguishes the two, instead of on
+                amount alone. */}
+            {txn.type === 'declined'
+              ? 'Declined'
+              : txn.type === 'unparsed'
+              ? 'Amount unclear'
+              : `${amountPrefix}${formatAmount(txn.amount as number)}`}
           </Text>
 
           {isEdited ? (

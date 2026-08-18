@@ -13,13 +13,27 @@
  * review queue), source 'manual', and deliberately runs no duplicate
  * detection (findDuplicateCandidate() is never called here).
  *
- * Account picker: fetches existing accounts + ensures Cash exists
- * (resolveCashAccountId(), same as accounts.tsx), filtered to
- * is_active !== false. This is the one place account-tracking (accounts.
- * is_active) actually has a real effect right now — see the discussion
- * this session on why enforcing it at SMS-ingestion time was deferred
- * (too risky to touch blind) while a brand-new form with no existing
- * behavior to break was safe to filter immediately.
+ * Account picker: fetches existing accounts, filtered to is_active !==
+ * false. This is the one place account-tracking (accounts.is_active)
+ * actually has a real effect right now — see the discussion this session
+ * on why enforcing it at SMS-ingestion time was deferred (too risky to
+ * touch blind) while a brand-new form with no existing behavior to break
+ * was safe to filter immediately.
+ *
+ * [FIX — this pass] Cash account creation is now LAZY, only at actual
+ * submit time, only if Cash is actually chosen. Previously,
+ * resolveCashAccountId() ran unconditionally in loadAccounts() — meaning
+ * merely OPENING this screen (even if the user cancelled without
+ * submitting, or picked a completely different account) permanently
+ * created a Cash row in `accounts`. That's also why the Accounts list
+ * always showed Cash even for users who'd never used it — see
+ * profile/accounts.tsx's matching fix, removing the same eager call.
+ * Now: if no real Cash account exists yet, a synthetic placeholder chip
+ * (CASH_PLACEHOLDER_ID) is shown in its place; selecting it and
+ * submitting is what actually calls resolveCashAccountId(), once, right
+ * before the insert. If a real Cash account already exists (the user has
+ * used it before), it just appears in the normal account list like any
+ * other account — no placeholder needed in that case.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Switch } from 'react-native';
@@ -32,6 +46,11 @@ import { insertManualTransaction } from '@/lib/api/transactions';
 import { saveCustomCategory } from '@/lib/api/customCategories';
 import { fetchAccounts, resolveCashAccountId, type Account } from '@/lib/api/accounts';
 import { fetchUserCategories, saveUserCategory, mergeUserCategoriesIntoTaxonomy, type UserCategoryRow } from '@/lib/api/userCategories';
+
+// [ADD] Sentinel selected in place of a real account id when Cash hasn't
+// been resolved to a real row yet. Distinct from any real UUID by
+// construction, so it can never collide with an actual account.id.
+const CASH_PLACEHOLDER_ID = '__cash_placeholder__';
 
 function todayIso(): string {
   const d = new Date();
@@ -81,15 +100,29 @@ export default function AddTransactionScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // [FIX] No longer calls resolveCashAccountId() here — see file docblock.
+  // Just fetches whatever real accounts already exist. No default
+  // selection is made anymore either: previously this defaulted to the
+  // (eagerly-created) Cash account, which is exactly the behavior being
+  // removed. The user now has to actively pick something, same as any
+  // other account.
+  //
+  // [ADD] Also tracks the unfiltered fetch separately (allAccountsRaw) —
+  // needed so hasRealCashAccount below can check for an existing Cash
+  // row independent of is_active filtering. In practice Cash can no
+  // longer actually go inactive (it's excluded from the Profile >
+  // Accounts screen entirely — see that file — so there's no UI path to
+  // toggle it off), but checking the unfiltered list costs nothing and
+  // removes any dependence on that invariant holding forever.
+  const [allAccountsRaw, setAllAccountsRaw] = useState<Account[]>([]);
+
   const loadAccounts = useCallback(async () => {
     setLoadingAccounts(true);
     try {
-      const cashId = await resolveCashAccountId();
       const rows = await fetchAccounts();
-      // [Filtering by is_active happens here — see file docblock.]
+      setAllAccountsRaw(rows);
       const active = rows.filter((a) => a.is_active !== false);
       setAccounts(active);
-      setAccountId((prev) => prev ?? cashId);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -98,6 +131,18 @@ export default function AddTransactionScreen() {
   }, []);
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
+
+  // [FIX] Checks allAccountsRaw (unfiltered), not accounts (active-only)
+  // — previously checked the filtered list, which meant a Cash account
+  // that had somehow gone inactive would be invisible to this check, the
+  // placeholder would show again, and selecting+submitting it would
+  // attribute the new transaction to the existing (inactive, hidden-from-
+  // feed) Cash account — the transaction would silently vanish from the
+  // user's own Feed immediately after adding it. See profile/accounts.tsx
+  // for why this specific scenario shouldn't be reachable via normal use
+  // anymore either way (Cash has no toggle UI at all now) — this is a
+  // defensive fix, not a fix for a currently-reachable path.
+  const hasRealCashAccount = allAccountsRaw.some((a) => a.account_type === 'cash');
 
   // [CHANGE] Was `TAXONOMY[type] ?? []` directly. Now merges in this
   // user's saved user_categories for the current type — see
@@ -174,6 +219,15 @@ export default function AddTransactionScreen() {
     setFormError(null);
     setSubmitting(true);
     try {
+      // [ADD] The ONLY place Cash gets created now — right here, only if
+      // the user actually selected the placeholder chip. If a real Cash
+      // account already existed, accountId is already its real id and
+      // this branch never runs.
+      let resolvedAccountId = accountId;
+      if (resolvedAccountId === CASH_PLACEHOLDER_ID) {
+        resolvedAccountId = await resolveCashAccountId();
+      }
+
       const inserted = await insertManualTransaction({
         txn_date: txnDate,
         amount: signedAmount(magnitude, type, subCategory),
@@ -181,7 +235,7 @@ export default function AddTransactionScreen() {
         category,
         sub_category: subCategory ?? null,
         merchant: merchant || null,
-        account_id: accountId,
+        account_id: resolvedAccountId,
       });
 
       if (saveCustom && merchant && category) {
@@ -338,6 +392,21 @@ export default function AddTransactionScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
+            {/* [ADD] Cash placeholder — only rendered if no real Cash
+                account exists yet. Selecting this doesn't create anything;
+                the real row is only created in handleSubmit() if this
+                chip is still selected at actual submit time. */}
+            {!hasRealCashAccount && (
+              <TouchableOpacity
+                key={CASH_PLACEHOLDER_ID}
+                style={[styles.chip, accountId === CASH_PLACEHOLDER_ID && styles.chipActive]}
+                onPress={() => setAccountId(CASH_PLACEHOLDER_ID)}
+              >
+                <Text style={[styles.chipText, accountId === CASH_PLACEHOLDER_ID && styles.chipTextActive]}>
+                  Cash
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 

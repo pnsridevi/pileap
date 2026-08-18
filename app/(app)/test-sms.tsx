@@ -13,7 +13,7 @@ import * as Sharing from 'expo-sharing';
 import { useNavigation } from 'expo-router';
 import { colors, spacing, fontSize, fontWeight, radius } from '@/constants/theme';
 import { SmsReader, SmsMessage } from '../../modules/sms-reader/src/index';
-import { parseSmsMessages, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext, ParseLogs } from '@/lib/smsParser';
+import { parseSmsMessages, logLayer1Candidates, ParsedTransaction, BalanceUpdate, isBalanceUpdate, MatchContext, ParseLogs } from '@/lib/smsParser';
 import { ingestParsedMessages, IngestResult } from '@/lib/api/transactions';
 import { fetchActiveRegisteredFacts } from '@/lib/api/registeredFacts';
 import { fetchCustomCategories } from '@/lib/api/customCategories';
@@ -128,6 +128,19 @@ export default function TestSmsScreen() {
       const msgs = await SmsReader.getMessages(fromDays, toDays);
       // Yield to UI thread before heavy parsing so the loading spinner renders
       await new Promise(resolve => setTimeout(resolve, 0));
+
+      // [ADD] Layer 1 candidates — separate inbox scan, separate list. Does
+      // NOT affect `parsed`/`rawMsgs`/anything rendered below; only feeds
+      // Log A via logLayer1Candidates(), same as Layer 2/3 already do.
+      try {
+        const layer1Candidates = await SmsReader.getLayer1Candidates(fromDays, toDays);
+        logLayer1Candidates(layer1Candidates, parseLogsRef.current);
+      } catch (l1Err: any) {
+        // [FIX-shaped note] Mirrors the registered_facts/custom_categories
+        // degrade-don't-block convention above — a Layer 1 candidate fetch
+        // failure must never prevent the main parse from completing.
+        console.warn('getLayer1Candidates failed — continuing without Layer 1 candidate logging:', l1Err?.message ?? l1Err);
+      }
 
       // [ADD] Fetch registered_facts + custom_categories ONCE for this parse
       // run — matches ingestParsedMessages()'s existing convention of

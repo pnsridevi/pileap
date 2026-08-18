@@ -10,6 +10,12 @@ declare class SmsReaderModule extends NativeModule<{}> {
   // Returns ALL SMS in a date window with NO filter — raw export only
   getAllMessages(fromDays: number, toDays: number): Promise<SmsMessage[]>;
 
+  // [ADD] Returns messages Layer 1 dropped because a currency signal was
+  // present but no recognized direction verb was found — logging
+  // candidates for Log A (haiku_candidate_log), not transactions. See
+  // smsParser.ts's logLayer1Candidates().
+  getLayer1Candidates(fromDays: number, toDays: number): Promise<SmsMessage[]>;
+
   // Debug: returns all unique senders + total count from raw inbox
   getAllSenders(): Promise<{ totalCount: number; senders: string[] }>;
 

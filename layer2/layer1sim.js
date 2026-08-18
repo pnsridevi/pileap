@@ -72,7 +72,12 @@ function passesLayer1Filter(body) {
   // form and had no currency signal at all as a result — same failure
   // shape as the already-fixed "Rs1,532" (no space/period) gap, different
   // missing token. Generic "amt" + digit check, not IRCTC-specific.
-  const hasCurrencyMarker = b.includes("rs.") || b.includes("rs ") || b.includes("inr") || b.includes("₹") || /rs\d/.test(b) || /\bamt\.?\s*\d/i.test(b);
+  // [FIX] Consolidated "rs."/"rs "/rs\d checks into one word-boundary
+  // regex — mirrors identical fix in SmsReaderModule.kt. Old checks
+  // false-fired on any word ending in "rs " ("hours ", "offers ",
+  // "advisors "). Backtested: fixes 38 false positives, loses 0 real Rs
+  // mentions across 1,127 real messages. Also catches "Rs:500"/"Rs-500".
+  const hasCurrencyMarker = /\brs[.\s:\-]*\d/i.test(b) || b.includes("inr") || b.includes("₹") || /\bamt\.?\s*\d/i.test(b);
   if (!hasCurrencyMarker) {
     if (b.includes("out for delivery") || b.includes("shipment") || b.includes("your order has been") ||
         b.includes("pickup scheduled") || b.includes("courier") || b.includes("tracking id") ||
@@ -258,7 +263,13 @@ function passesLayer1Filter(body) {
     b.includes("settlement") ||
     b.includes("payout");
 
-  if (!hasCurrencySignal || !hasDirectionSignal) return { pass: false, reason: 'no_signal' };
+  // [CHANGED] Split 'no_signal' into two distinct reasons — mirrors
+  // SmsReaderModule.kt's lastDropReason split. 'no_direction' (currency
+  // present, direction verb not recognized) is the one drop category
+  // backtesting showed has real recovery value; 'no_currency' never does,
+  // since there's no amount to recover at all.
+  if (!hasCurrencySignal) return { pass: false, reason: 'no_currency' };
+  if (!hasDirectionSignal) return { pass: false, reason: 'no_direction' };
 
   // 9. payee ack
   const hasBankAccountRef = /[ax][x*/]\d{4}/i.test(b) || /a\/c\s*(?:no\.?)?\s*[x*]{0,4}\d{4}/i.test(b) ||
@@ -275,4 +286,11 @@ function passesLayer1Filter(body) {
   return { pass: true, reason: null };
 }
 
-module.exports = { passesLayer0, passesLayer1Filter };
+// [ADD] Test-harness helper mirroring getLayer1Candidates() in
+// SmsReaderModule.kt — true only for the one drop category with real
+// backtested recovery value.
+function isLayer1Candidate(body) {
+  return passesLayer1Filter(body).reason === 'no_direction';
+}
+
+module.exports = { passesLayer0, passesLayer1Filter, isLayer1Candidate };

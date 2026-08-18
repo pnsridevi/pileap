@@ -402,6 +402,39 @@ function extractMerchant(body) {
   m = body.match(/X+\d+-TPT-.{2,40}?-([A-Z][A-Z .]{2,40}?)(?:\.|\s*$)/i);
   if (m) return m[1].trim();
 
+  // [ADD] "NEFT Cr-<bankcode>-<COMPANY NAME>-<person name>-<refnum>" —
+  // employer/counterparty name on an inward NEFT credit (e.g. "NEFT Cr-
+  // RATN0000999-PROJAS CONSULTANCY SERVICES PRIVATE-Sridevi P N-
+  // 000534301741"). Captures the FIRST hyphen/slash-delimited segment
+  // after the bank-code-like token — that's the company/counterparty name
+  // in every real example seen so far, with the remitter's personal name
+  // and the reference number following as later segments.
+  //
+  // ONLY VALIDATED AGAINST HDFC — every real NEFT-credit message in this
+  // project's dataset so far is HDFC, using this exact hyphen-delimited
+  // shape. NEFT's reference number (UTR) is RBI-standardized, but the
+  // surrounding SMS narration text is NOT — each bank's own system
+  // generates it independently, so ICICI/Axis/PNB/SBI etc. may format
+  // this differently (confirmed generally true, not confirmed exactly
+  // how). The delimiter class below tolerates hyphen or slash between
+  // segments specifically because of that uncertainty — but this pattern
+  // should NOT be assumed to cover other banks until a real example from
+  // one shows up. If it doesn't match, extractMerchant() correctly
+  // returns null further down, which routes to the confidence gate
+  // (Log B, merchant_null) rather than a silent wrong guess — that's the
+  // intended fallback, not a gap to close preemptively.
+  //
+  // [SEE ALSO] The taxonomy Salary rule in smsParser.ts previously guessed
+  // "Monthly Salary" from a bare "NEFT Cr" match — removed this same pass
+  // (see that file's change log) precisely because "NEFT Cr" alone can't
+  // distinguish an employer from a consultancy/business/family payment.
+  // This pattern deliberately does NOT feed any category guess — it only
+  // names the counterparty, so matchCustomCategory() (which runs before
+  // any taxonomy pattern in classify()) can let the user resolve the
+  // category once, correctly, per actual sender.
+  m = body.match(/\bNEFT\s*Cr[\-\/\s]*[A-Z]{2,6}\d{4,8}[\-\/]+([A-Za-z][A-Za-z0-9 .,&']{2,60}?)[\-\/]+(?=[A-Za-z0-9])/i);
+  if (m) return m[1].trim();
+
   // [ADD] "UPI/P2A/<ref>/<NAME>" or "UPI/P2M/<ref>/<NAME>" — the payee/
   // payer name for person-to-person and person-to-merchant UPI transfers
   // (Axis Bank format seen in real data: "UPI/P2A/620920585592/ANITHA S").

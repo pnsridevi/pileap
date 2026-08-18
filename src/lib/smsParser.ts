@@ -1036,25 +1036,35 @@ const TAXONOMY: TaxonomyEntry[] = [
     patterns: [
       /\bsalary\b/i, /\bsal\s+credit\b/i, /\bpayroll\b/i,
       /\bach\s+(credit|cr)\b/i, /\bcorporate\s+credit\b/i,
-      // [ADD] Employer NEFT salary credits not caught by \bsalary\b keyword.
-      // "NEFT Cr-BOFA0MM6205-LOGITECH ENGINEERING AND DESIGNS-VIJAYARAGHAVAN C"
+      // [REMOVED — this pass] Was: a bare `\bneft\s+cr\b` pattern (with a
+      // negative-lookahead blocklist for LIC/insurance/mutual fund/
+      // dividend/refund) that guessed Salary for ANY unblocked "NEFT Cr"
+      // narration. Removed per product decision, not narrowed further —
+      // real data confirmed the failure mode generalizes beyond what any
+      // blocklist can keep up with: "NEFT Cr-RATN0000999-PROJAS
+      // CONSULTANCY SERVICES PRIVATE-..." (a consulting/business payment,
+      // not the user's employer) matched cleanly and got auto-labeled
+      // Monthly Salary with zero human check, since this taxonomy entry
+      // never set `ambiguous: true`. "NEFT Cr" is a generic bank-credit
+      // narration prefix used for salary, consulting fees, freelance
+      // payments, family transfers, B2B payments, and government payouts
+      // alike — genuinely too weak a signal to decide Salary on its own,
+      // and every non-employer sender name that hasn't been seen yet would
+      // need its own blocklist entry to catch, one false positive at a
+      // time. Employer names are open-ended and un-listable the same way
+      // merchant names are.
       //
-      // [FIX — this pass] Narrowed with a negative lookahead. Confirmed real
-      // false positive: "NEFT Cr-CIUB0000032-LIC INDIA D075-P N SRIDEVI..."
-      // — an LIC policy payout (maturity/bonus), not wages — was matching
-      // the bare phrase and getting labeled Monthly Salary. "NEFT Cr" is
-      // generic NEFT-credit narration used for insurance payouts, refunds,
-      // dividends, and vendor payments alike, not specific to payroll; on
-      // its own it's too weak a signal to decide Salary. The lookahead
-      // blocks the match when a clearly-non-employer term appears within
-      // the same narration segment, while leaving the original LOGITECH
-      // example (no such term nearby) matching exactly as before. This is
-      // a narrow patch for the one confirmed case, not a general solution —
-      // an employer name will always be open-ended and un-listable the same
-      // way merchant names are; the real fix is the same confidence-gating/
-      // custom_categories direction already discussed and deferred for
-      // that broader class of problem.
-      /\bneft\s+cr\b(?!.{0,60}?\b(?:lic|insurance|assurance|amc|mutual\s+fund|dividend|interest|refund)\b)/i,
+      // NEFT credits with no matching pattern here now fall through with
+      // category: null (Income type still applies — see the amount-sign-
+      // based type derivation, unaffected by this change) rather than a
+      // confident wrong guess. The real path to a correct category is
+      // extractMerchant() actually naming the sender (see the new NEFT-Cr
+      // merchant pattern in ruleset.js) so custom_categories can resolve
+      // it — matchCustomCategory() already runs BEFORE this taxonomy table
+      // in classify(), so once merchant extraction works for a given NEFT
+      // narration, a user's one-time custom-category choice takes
+      // permanent priority over any text-pattern guess here, for that
+      // sender specifically, going forward.
     ] },
 
   { type: 'Income', category: 'Refunds', sub_category: 'Purchase Refund',
@@ -1923,6 +1933,38 @@ function logHaikuCandidate(
     extracted_channel:   extracted.channel,
     logged_at: new Date().toISOString(),
   });
+}
+
+// [ADD] Layer 1 candidate logging. Takes raw SMS that Layer 1 dropped as
+// no_direction (currency present, direction verb not recognized — see
+// SmsReaderModule.kt/layer1sim.js's getLayer1Candidates/isLayer1Candidate)
+// and logs them into the SAME Log A pipeline Layer 2/3 already use, so the
+// existing syncParseLogs() call uploads them with zero new plumbing.
+// Deliberately does NOT run these through classify() or create a
+// ParsedTransaction — Layer 1 candidates never become pending_review rows
+// directly here; only a future Haiku drain job (not built yet) does that,
+// after actually confirming they're real transactions and not noise the
+// current direction-signal list just doesn't recognize yet.
+export function logLayer1Candidates(candidates: RawMessage[], logs: ParseLogs): void {
+  for (const msg of candidates) {
+    const msgDate    = new Date(msg.date).toISOString().split('T')[0];
+    const extracted  = extractFields(msg.body);
+    logs.haikuCandidates.push({
+      raw_sms_id: msg.id,
+      raw_text:   msg.body,
+      txn_date:   msgDate,
+      // 'unknown_direction' is the existing enum value that matches this
+      // case exactly — amount extractable, direction isn't. No DB
+      // migration needed; matches haiku_candidate_log's check constraint.
+      reason:     'unknown_direction',
+      extracted_amount:    extracted.amount,
+      extracted_is_credit: extracted.isCredit,
+      extracted_merchant:  extracted.merchant,
+      extracted_bank:      extracted.bank,
+      extracted_channel:   extracted.channel,
+      logged_at: new Date().toISOString(),
+    });
+  }
 }
 
 function buildEscalated(

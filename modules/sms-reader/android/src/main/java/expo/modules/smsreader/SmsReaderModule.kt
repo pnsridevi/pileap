@@ -118,6 +118,14 @@ import expo.modules.kotlin.exception.CodedException
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SmsReaderModule : Module() {
+  // [ADD] Per-call scratch value set by passesFilter() right before it
+  // returns false at the one drop point (step 8, no_direction) that
+  // getLayer1Candidates() cares about. Reset to null at the start of every
+  // passesFilter() invocation by the caller loop — see getLayer1Candidates()
+  // below. Not thread-shared state: SMS reading runs on a single coroutine
+  // per call, never concurrently within one AsyncFunction invocation.
+  private var lastDropReason: String? = null
+
   override fun definition() = ModuleDefinition {
     Name("SmsReader")
 
@@ -182,6 +190,78 @@ class SmsReaderModule : Module() {
         }
 
         promise.resolve(messages)
+      } catch (e: Exception) {
+        promise.reject(CodedException("ERR_SMS_READ", e.message ?: "Failed to read SMS", e))
+      }
+    }
+
+    // ── getLayer1Candidates ─────────────────────────────────────────────────
+    // [ADD] Returns messages Layer 1 dropped specifically because a currency
+    // signal was present but no recognized direction verb was found
+    // (passesFilter's step 8 "no_direction" case) — the one drop category
+    // backtesting showed has real (if rare, ~4.7% of drops) risk of losing
+    // genuine transactions, the same shape that produced the Zerodha
+    // "processed" and IRCTC "will be refunded" bugs before those verbs were
+    // added. Every other Layer 1 drop (OTP, telecom, loyalty, promo,
+    // service_noise, payee_ack) is intentionally excluded — backtested as
+    // safe, reliably paired with a separate real bank SMS.
+    //
+    // These are logging candidates only. Nothing here creates a transaction
+    // or calls Haiku — see logLayer1Candidates() in smsParser.ts, which
+    // writes them into the existing Log A (haiku_candidate_log) pipeline.
+    AsyncFunction("getLayer1Candidates") { fromDays: Int, toDays: Int, promise: Promise ->
+      val context = appContext.reactContext
+        ?: return@AsyncFunction promise.reject(
+            CodedException("ERR_NO_CONTEXT", "React context unavailable", null))
+
+      if (!hasPermission(context)) {
+        promise.reject(CodedException("ERR_NO_PERMISSION", "READ_SMS permission not granted", null))
+        return@AsyncFunction
+      }
+
+      try {
+        val candidates = mutableListOf<Map<String, Any?>>()
+        val now    = System.currentTimeMillis()
+        val fromMs = now - (toDays.toLong()  * 24 * 60 * 60 * 1000)
+        val toMs   = now - (fromDays.toLong() * 24 * 60 * 60 * 1000)
+
+        val cursor: Cursor? = context.contentResolver.query(
+          Uri.parse("content://sms/inbox"),
+          arrayOf("_id", "address", "body", "date"),
+          "date > ? AND date <= ?",
+          arrayOf(fromMs.toString(), toMs.toString()),
+          "date DESC"
+        )
+
+        cursor?.use {
+          val idIndex   = it.getColumnIndexOrThrow("_id")
+          val addrIndex = it.getColumnIndexOrThrow("address")
+          val bodyIndex = it.getColumnIndexOrThrow("body")
+          val dateIndex = it.getColumnIndexOrThrow("date")
+
+          while (it.moveToNext()) {
+            val address = it.getString(addrIndex) ?: continue
+            val body    = it.getString(bodyIndex) ?: continue
+
+            // Same Layer 0 gate as getMessages() — a -P/numeric sender is
+            // never a candidate regardless of what its body says.
+            if (address.endsWith("-P", ignoreCase = true)) continue
+            if (address.matches(Regex("^\\d+$"))) continue
+
+            lastDropReason = null
+            val passed = passesFilter(body)
+            if (!passed && lastDropReason == "no_direction") {
+              candidates.add(mapOf(
+                "id"      to it.getString(idIndex),
+                "address" to address,
+                "body"    to body,
+                "date"    to it.getLong(dateIndex)
+              ))
+            }
+          }
+        }
+
+        promise.resolve(candidates)
       } catch (e: Exception) {
         promise.reject(CodedException("ERR_SMS_READ", e.message ?: "Failed to read SMS", e))
       }
@@ -328,9 +408,16 @@ class SmsReaderModule : Module() {
     // and had no currency signal at all as a result — same failure shape
     // as the fix just above, different missing token. Generic "amt" +
     // digit check, not IRCTC-specific.
-    val hasCurrencyMarker = b.contains("rs.") || b.contains("rs ") ||
+    // [FIX] Consolidated the old "rs."/"rs "/rs\d checks into one
+    // word-boundary regex. Those bare substring checks false-fired on any
+    // word ending in "rs" followed by a space — "hours ", "offers ",
+    // "advisors " all contained the literal substring "rs " and wrongly set
+    // hasCurrencyMarker=true. Backtested against 1,127 real device
+    // messages: this fix corrects 38 false positives and loses 0 real Rs
+    // mentions. Also now catches separator forms the old checks missed,
+    // e.g. "Rs:500", "Rs-500". Mirrors the identical fix in layer1sim.js.
+    val hasCurrencyMarker = Regex("""\brs[.\s:\-]*\d""", RegexOption.IGNORE_CASE).containsMatchIn(b) ||
                             b.contains("inr") || b.contains("₹") ||
-                            Regex("""rs\d""").containsMatchIn(b) ||
                             Regex("""\bamt\.?\s*\d""", RegexOption.IGNORE_CASE).containsMatchIn(b)
     if (!hasCurrencyMarker) {
       if (b.contains("out for delivery") ||
@@ -679,7 +766,17 @@ class SmsReaderModule : Module() {
       // settlements) but for the debit side. Mirrors layer1sim.js.
       Regex("""\bconfirm(?:ed)?\s+receipt\s+of\b""", RegexOption.IGNORE_CASE).containsMatchIn(b)
 
-    if (!hasCurrencySignal || !hasDirectionSignal) return false
+    if (!hasCurrencySignal) return false
+    // [ADD — Layer 1 candidate logging] Currency present, no recognized
+    // direction verb — the one drop category with real backtested risk
+    // (Zerodha "processed", IRCTC "will be refunded" were both this exact
+    // shape before those verbs were added above). Record via
+    // lastDropReason so getLayer1Candidates() can recover it for logging;
+    // does not change this function's own return value or behavior.
+    if (!hasDirectionSignal) {
+      lastDropReason = "no_direction"
+      return false
+    }
 
     // ── 9. Drop payee-side acknowledgments (generic) ──────────────────────────
     //

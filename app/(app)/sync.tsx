@@ -22,6 +22,7 @@
  * exportRawSms) is unchanged from test-sms.tsx.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, ActivityIndicator, Platform, PermissionsAndroid, Alert, Linking,
@@ -201,6 +202,17 @@ export default function SyncScreen() {
     try {
       const result = await syncRecentSmsMessages(true, (update) => {
         setManualSyncProgress(update);
+        // [FIX] Was only refreshed before this sync started and after it
+        // fully finished — the number on screen during an in-progress
+        // sync was a stale snapshot from before this run began, while
+        // the Transactions tab (which fetches fresh on its own) showed
+        // the true, already-growing count. ingestParsedMessages() reports
+        // progress once per chunk ('saving' stage) as rows actually land
+        // in Supabase — refreshing here keeps this screen's number
+        // honest throughout the run, not just at the start and end.
+        if (update.stage === 'saving') {
+          refreshTxnCount();
+        }
       });
       setManualSyncResult(result);
       await refreshLastSynced();
@@ -233,19 +245,45 @@ export default function SyncScreen() {
     return null;
   }
 
-  async function handleOpenExportPanel() {
-    if (exportPanelOpen) { setExportPanelOpen(false); setSelectedYear(null); return; }
-    setExportPanelOpen(true);
-    if (exportCache) return; // already fetched this session
+  async function loadExportCache(): Promise<boolean> {
     setLoadingMonths(true);
     try {
       setExportCache(await fetchAllTransactionsForExport());
+      return true;
     } catch (e: any) {
       Alert.alert('Couldn\u2019t load transactions', e.message ?? 'Unknown error');
-      setExportPanelOpen(false);
+      return false;
     } finally {
       setLoadingMonths(false);
     }
+  }
+
+  // [FIX] `exportCache` used to persist for as long as this screen stayed
+  // mounted, with no invalidation — a report generated after untracking an
+  // account on Profile > Accounts (or after any other sync-driven change)
+  // would silently reuse the pre-change transaction list. Confirmed bug
+  // report: untracked an account, generated a report, the account's
+  // transactions were still in it. Every focus now clears the cache, so
+  // returning to this screen always starts from a clean slate; if the
+  // export panel was left open across that trip, refetch immediately
+  // rather than leaving it showing stale year/month options until the
+  // user manually closes and reopens the panel.
+  useFocusEffect(
+    useCallback(() => {
+      setExportCache(null);
+      if (exportPanelOpen) {
+        loadExportCache();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [exportPanelOpen])
+  );
+
+  async function handleOpenExportPanel() {
+    if (exportPanelOpen) { setExportPanelOpen(false); setSelectedYear(null); return; }
+    setExportPanelOpen(true);
+    if (exportCache) return; // already fetched this visit
+    const ok = await loadExportCache();
+    if (!ok) setExportPanelOpen(false);
   }
 
   async function handleExport(range: ExportRange) {

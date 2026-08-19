@@ -40,8 +40,9 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Switch, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Svg, { Path, Rect, Polyline } from 'react-native-svg';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { colors, spacing, fontSize, fontWeight, radius, shadows } from '@/constants/theme';
 import { fetchAccounts, setAccountActive, type Account } from '@/lib/api/accounts';
 
@@ -126,7 +127,21 @@ export default function AccountsScreen() {
     }
   }, []);
 
-  useEffect(() => { loadAccounts(); }, [loadAccounts]);
+  // [FIX] Was `useEffect(() => { loadAccounts(); }, [loadAccounts]);` —
+  // fetched once at mount and never again. If an account gets created
+  // AFTER this screen last loaded (e.g. a new bank's SMS gets parsed by
+  // a background sync, or the on-app-open sync, while you're on a
+  // different screen), it would never appear here until a full app
+  // restart — confirmed against real data: an account created 5 minutes
+  // after this screen's last load simply wasn't in the list. useFocusEffect
+  // refetches every time this screen is navigated TO (including the
+  // first time, same as the old useEffect did), so leaving and coming
+  // back always shows what's actually in the database right now.
+  useFocusEffect(
+    useCallback(() => {
+      loadAccounts();
+    }, [loadAccounts])
+  );
 
   async function handleToggle(account: Account, nextValue: boolean) {
     // Optimistic update — flip it in local state immediately so the

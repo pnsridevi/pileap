@@ -185,6 +185,16 @@ export interface SmsSyncResult extends IngestResult {
 const FULL_WINDOW_DAYS = 90;
 const SAFETY_BUFFER_DAYS = 2;
 const WATERMARK_KEY_PREFIX = 'pileap:lastSyncedAt:';
+// [ADD] Separate from WATERMARK_KEY_PREFIX above. That key is now purely
+// an internal scan-sizing input (see the split below) — precise to the
+// newest message's real arrival time, capped so it never advances past a
+// failed message. This key is purely for what the UI shows as "Last
+// synced": the wall-clock moment a sync attempt last actually completed,
+// regardless of whether it found anything new. These need to be
+// different values — see getLastSyncedAt()'s docblock for why conflating
+// them (the original design, and this file's own earlier pass) breaks
+// the UI whenever a completed sync finds zero new messages.
+const LAST_SYNC_DISPLAY_KEY_PREFIX = 'pileap:lastSyncDisplayAt:';
 const LOCK_KEY_PREFIX = 'pileap:syncLock:';
 // Generous on purpose — a full 90-day/500+-message first sync (foreground,
 // no OS time limit) should never realistically take this long, but the
@@ -205,17 +215,36 @@ async function getCurrentUserIdOrNull(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-/** Last successful automatic-sync completion time for the current user, or
- * null if none is recorded yet. Used by the Sync screen's status card as
- * well as syncRecentSmsMessages() below. */
+/** [FIX] Was reading/writing the same key syncRecentSmsMessages() uses to
+ * size the next scan window — see LAST_SYNC_DISPLAY_KEY_PREFIX's comment
+ * above for why that broke the UI. Now purely display: the wall-clock
+ * time a sync attempt last actually completed, for the Sync screen's
+ * status card. Not used for any scan-window math — see
+ * getScanWatermark()/setScanWatermark() below for that. */
 export async function getLastSyncedAt(): Promise<Date | null> {
+  const userId = await getCurrentUserIdOrNull();
+  if (!userId) return null;
+  const raw = await AsyncStorage.getItem(LAST_SYNC_DISPLAY_KEY_PREFIX + userId);
+  return raw ? new Date(raw) : null;
+}
+
+async function setLastSyncDisplayTime(userId: string, when: Date): Promise<void> {
+  await AsyncStorage.setItem(LAST_SYNC_DISPLAY_KEY_PREFIX + userId, when.toISOString());
+}
+
+/** [ADD] Internal only — not read by the UI. Sizes the next sync's scan
+ * window (see syncRecentSmsMessages()'s fromDays calculation). Precise to
+ * the newest successfully-synced message's real arrival time, and never
+ * advances past a run where every scanned message failed — see
+ * syncRecentSmsMessages() for the full reasoning on both of those. */
+async function getScanWatermark(): Promise<Date | null> {
   const userId = await getCurrentUserIdOrNull();
   if (!userId) return null;
   const raw = await AsyncStorage.getItem(WATERMARK_KEY_PREFIX + userId);
   return raw ? new Date(raw) : null;
 }
 
-async function setLastSyncedAt(userId: string, when: Date): Promise<void> {
+async function setScanWatermark(userId: string, when: Date): Promise<void> {
   await AsyncStorage.setItem(WATERMARK_KEY_PREFIX + userId, when.toISOString());
 }
 
@@ -379,7 +408,7 @@ export async function syncRecentSmsMessages(
     return EMPTY_RESULT;
   }
 
-  const lastSyncedAt = await getLastSyncedAt();
+  const lastSyncedAt = await getScanWatermark();
 
   if (!lastSyncedAt && !allowFullBackfill) {
     // First-ever sync, called from the background task — defer to the
@@ -434,10 +463,21 @@ export async function syncRecentSmsMessages(
     //     the next run re-scans this same window instead of silently
     //     treating a fully-failed run as fully-synced.
     if (result.newestSyncedMessageDate) {
-      await setLastSyncedAt(userId, result.newestSyncedMessageDate);
+      await setScanWatermark(userId, result.newestSyncedMessageDate);
     } else if (result.messagesScanned === 0) {
-      await setLastSyncedAt(userId, new Date());
+      await setScanWatermark(userId, new Date());
     }
+    // [ADD] Separate from the scan watermark above. Reaching this line
+    // means the sync attempt itself completed — didn't crash, wasn't
+    // skipped as concurrent/deferred (those return earlier, before this
+    // point, and correctly never touch either watermark). That's exactly
+    // what "Last synced" should mean to the user: the app successfully
+    // checked, whether or not it found anything new to add. Always "now"
+    // here — unlike the scan watermark, this one isn't trying to be
+    // precise about message arrival time, it's answering a different
+    // question ("did a sync just run") that has nothing to do with
+    // whether any message happened to be new.
+    await setLastSyncDisplayTime(userId, new Date());
     return result;
   } finally {
     await releaseLock(userId);

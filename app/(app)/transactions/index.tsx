@@ -40,6 +40,7 @@
  * this screen currently has any transactions to show.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -118,7 +119,22 @@ export default function TransactionsFeedScreen() {
     setHasAny(any);
   }, []);
 
-  useEffect(() => { loadCounts(); }, [loadCounts]);
+  // [FIX] Was `useEffect(() => { loadCounts(); }, [loadCounts]);` — ran
+  // once at mount and never again. totalCount (above, from
+  // useTransactionFeed) and needsReviewCount (here) are two SEPARATE data
+  // paths on this screen with different refresh behavior — confirmed
+  // bug report: totalCount stayed accurate through a sync (100), while
+  // needsReviewCount stayed stuck at its mount-time value (3) the whole
+  // time. useFocusEffect refetches every time this screen is navigated TO
+  // (including the first time, same as the old useEffect did) — so
+  // switching back to this tab after a sync completes on the Sync tab, or
+  // after a background sync runs, always shows the real current count
+  // instead of whatever it was when this screen last mounted.
+  useFocusEffect(
+    useCallback(() => {
+      loadCounts();
+    }, [loadCounts])
+  );
 
   // [ADD] Runs once per mount — i.e. every time this screen loads, including
   // app reopen — to catch up any transaction that was left pending_review

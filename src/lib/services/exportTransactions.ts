@@ -188,11 +188,9 @@ interface TabSummary {
   label: string;
   totalCredits: number;
   totalDebits: number;
-  net: number;
   transactionCount: number;
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
-  needsReviewCount: number;
 }
 
 /** Computes the summary block for one sheet's worth of transactions —
@@ -202,7 +200,6 @@ interface TabSummary {
 function computeSummary(transactions: Transaction[], label: string): TabSummary {
   let totalCredits = 0;
   let totalDebits = 0;
-  let needsReviewCount = 0;
   let dateRangeStart: string | null = null;
   let dateRangeEnd: string | null = null;
 
@@ -210,10 +207,6 @@ function computeSummary(transactions: Transaction[], label: string): TabSummary 
     const amount = txn.amount ?? 0;
     if (amount > 0) totalCredits += amount;
     else totalDebits += Math.abs(amount);
-
-    if (txn.status === 'pending_review' || txn.status === 'haiku_suggested') {
-      needsReviewCount++;
-    }
 
     if (txn.txn_date) {
       if (!dateRangeStart || txn.txn_date < dateRangeStart) dateRangeStart = txn.txn_date;
@@ -225,11 +218,9 @@ function computeSummary(transactions: Transaction[], label: string): TabSummary 
     label,
     totalCredits,
     totalDebits,
-    net: totalCredits - totalDebits,
     transactionCount: transactions.length,
     dateRangeStart,
     dateRangeEnd,
-    needsReviewCount,
   };
 }
 
@@ -248,11 +239,17 @@ function summaryToRows(summary: TabSummary): (string | number)[][] {
     ['Transactions', summary.transactionCount],
     ['Total Credits (₹)', Math.round(summary.totalCredits * 100) / 100],
     ['Total Debits (₹)', Math.round(summary.totalDebits * 100) / 100],
-    ['Net (₹)', Math.round(summary.net * 100) / 100],
   ];
-  if (summary.needsReviewCount > 0) {
-    rows.push(['Still Needs Review', summary.needsReviewCount]);
-  }
+  // [FIX] "Net (₹)" row removed entirely — was Total Credits minus Total
+  // Debits across EVERY transaction regardless of Type, which conflates
+  // real spending with investment outflow and loan repayment (an SIP debit
+  // and a restaurant bill counted identically). A correct net figure needs
+  // per-Type breakdown, which isn't reliable here either — any transaction
+  // still pending_review has no Type assigned yet (see the blank Type
+  // column for plenty of rows in a typical export), so even a Type-based
+  // breakdown would be wrong for anything not yet reviewed. Rather than
+  // show a number that reads as "you lost this much" when it isn't that,
+  // don't show one — Total Credits/Debits alone are unambiguous.
   rows.push([]); // blank separator before the transaction table
 
   return rows;
@@ -281,10 +278,19 @@ function buildWorkbook(transactions: Transaction[]): XLSX.WorkBook {
   // One tab per account — each summary scoped to ONLY that account's own
   // rows (computeSummary() is called fresh per group below, not shared
   // with the overall totals above).
+  // [FIX] No longer creates a separate "Unassigned" tab for transactions
+  // with no resolved account_id. Every export realistically has some of
+  // these (see resolveAccountId()'s docblock in transactions.ts — a
+  // broker settlement note, a refund SMS, etc. often just doesn't state
+  // an account number), so treating it as its own account-style tab
+  // overstates it as a real account. These rows are still fully present
+  // in "All Transactions" above — only the redundant dedicated tab is
+  // removed.
   const byAccount = new Map<string, { label: string; rows: Transaction[] }>();
   for (const txn of transactions) {
-    const key = txn.account_id ?? 'unassigned';
-    const label = txn.account_id ? accountLabel(txn) : 'Unassigned';
+    if (!txn.account_id) continue;
+    const key = txn.account_id;
+    const label = accountLabel(txn);
     if (!byAccount.has(key)) byAccount.set(key, { label, rows: [] });
     byAccount.get(key)!.rows.push(txn);
   }

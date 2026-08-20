@@ -536,20 +536,17 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
 
           {isEdited ? (
             <Badge color={colors.brand} label="Edited · pending submit" />
-          ) : txn.status === 'pending_review' ? (
+          ) : txn.status === 'pending_review' || txn.status === 'haiku_suggested' ? (
+            // [CHANGED] haiku_suggested used to render its own "Suggested"
+            // badge (see git history / earlier comment). Per product
+            // decision: the user doesn't need to know or care whether
+            // Haiku already filled this row in — to them it should just
+            // look like any other row still awaiting their review. The
+            // DB status itself is untouched and still distinct
+            // ('haiku_suggested' vs 'pending_review') — this is a display-
+            // only merge, so internal tracking/analytics on Haiku's
+            // resolution rate is unaffected.
             <Badge variant="pending" label="Pending Review" />
-          ) : txn.status === 'haiku_suggested' ? (
-            // [ADD] Per explicit product decision: haiku_suggested renders
-            // as "Suggested" in the UI, not the raw status name — this is
-            // a Haiku-guessed category awaiting confirmation, distinct from
-            // pending_review's "couldn't classify at all, or amount is
-            // large enough to double-check" reasons. Reusing the 'pending'
-            // Badge variant since that's a value I've confirmed this
-            // component already uses safely — if Badge.tsx has (or should
-            // get) a visually distinct variant for "suggested," swap this
-            // for that instead of adding a variant name I can't verify
-            // exists.
-            <Badge variant="pending" label="Suggested" />
           ) : needsTransferConfirmation ? (
             <Badge variant="transfer" label="Confirm transfer?" />
           ) : null}

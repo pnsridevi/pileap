@@ -1709,7 +1709,15 @@ export function parseSmsMessages(
 function parseSingleSms(msg: RawMessage, matchContext?: MatchContext, logs?: ParseLogs): ParsedTransaction | BalanceUpdate {
   const body    = msg.body;
   const isInfra = UPI_INFRA_SENDERS.some(s => msg.address.toUpperCase().includes(s));
-  const msgDate = new Date(msg.date).toISOString().split('T')[0];
+  // [FIX] Was `.toISOString().split('T')[0]` — always renders in UTC
+  // regardless of device timezone. Since IST is UTC+5:30, any SMS arriving
+  // between 12:00 AM and 5:29 AM IST was being dated to the PREVIOUS day
+  // (e.g. 12:10 AM IST on the 2nd -> 6:40 PM UTC on the 1st -> msgDate
+  // wrongly "2nd - 1 day"). This is the app's only user base (India), not
+  // an edge case — every early-morning transaction was affected. India has
+  // no DST, so 'Asia/Kolkata' is a fixed UTC+5:30 year-round; this fix
+  // doesn't need any seasonal handling.
+  const msgDate = new Date(msg.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
   // ── LAYER 2 ───────────────────────────────────────────────────────────────
   const l2 = matchMessage(body, msgDate);
@@ -1967,7 +1975,10 @@ function logHaikuCandidate(
 // current direction-signal list just doesn't recognize yet.
 export function logLayer1Candidates(candidates: RawMessage[], logs: ParseLogs): void {
   for (const msg of candidates) {
-    const msgDate    = new Date(msg.date).toISOString().split('T')[0];
+    // [FIX] Same IST-boundary bug as parseSingleSms()'s msgDate above —
+    // see that comment for the full explanation. Two independent call
+    // sites computed this the same wrong way; both needed fixing.
+    const msgDate    = new Date(msg.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const extracted  = extractFields(msg.body);
     logs.haikuCandidates.push({
       raw_sms_id: msg.id,

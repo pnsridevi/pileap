@@ -1954,13 +1954,22 @@ export async function reconcilePendingTransactions(): Promise<ReconcileResult> {
   // forcing status:'approved' below would wrongly clear that independent
   // review requirement. Excludes user_reviewed — a human already looked at
   // that row; not this pass's place to second-guess it.
+  // [ADD — Haiku pipeline] Also excludes haiku_suggested — same reasoning
+  // as user_reviewed above, one step earlier in the lifecycle: a Haiku-
+  // resolved row already has a real guess sitting in it, awaiting human
+  // confirmation. Letting this pass silently flip it straight to
+  // 'approved' (because the merchant happens to match a saved custom
+  // category) would skip that confirmation entirely — the same checkpoint
+  // this pipeline was deliberately built to always give a human, everywhere
+  // else. Without this, a Haiku-filled row could go from "needs review" to
+  // "approved" with no human ever having seen it.
   const [{ data: pendingRows, error: fetchError }, customCategories, registeredFacts] = await Promise.all([
     supabase
       .from('transactions')
       .select('id, amount, merchant, ref_number')
       .eq('user_id', userId)
       .eq('is_deleted', false)
-      .neq('status', 'user_reviewed')
+      .not('status', 'in', '(user_reviewed,haiku_suggested)')
       .is('category', null)
       .is('possible_duplicate_of', null),
     fetchCustomCategories(),

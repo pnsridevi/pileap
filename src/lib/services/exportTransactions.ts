@@ -144,9 +144,14 @@ function filterByRange(transactions: Transaction[], range: ExportRange): Transac
   // activity" and "this/that calendar year" are genuinely different
   // questions people ask for different reasons (spend review vs.
   // taxes/accounting).
+  // [FIX] Was `.toISOString().slice(0, 10)` — UTC-computed cutoff compared
+  // against txn_date values that are IST-correct (see smsParser.ts's
+  // msgDate fix). Mismatched timezones on either side of a >= comparison
+  // could shift the window boundary by up to a day. Now computed in IST to
+  // match.
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - range.months);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
   return transactions.filter(t => t.txn_date && t.txn_date >= cutoffStr);
 }
 

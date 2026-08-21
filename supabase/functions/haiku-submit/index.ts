@@ -92,10 +92,13 @@ const RESPONSE_TOOL = {
             amount: { type: ['number', 'null'] },
             currency: { type: ['string', 'null'] },
             merchant: { type: ['string', 'null'] },
-            // Answers "is this a future-tense promise ('will be debited')
-            // rather than an already-happened confirmation ('was
-            // debited')" — used by haiku-collect to decide whether to run
-            // the provisional-notice linking check.
+            // Answers "has this money NOT yet been confirmed as landed in
+            // the user's bank account" — covers plain future tense AND
+            // vendor-side past-tense language ("processed"/"initiated")
+            // that hasn't been followed by a bank-side confirmation. See
+            // SYSTEM_PROMPT below for the full definition. Used by
+            // haiku-collect to decide whether to run the provisional-
+            // notice linking check.
             is_provisional_notice: { type: ['boolean', 'null'] },
             // [ADD] Only meaningful when is_provisional_notice is true.
             // ISO 8601 date string (YYYY-MM-DD) if the message states or
@@ -129,22 +132,22 @@ const RESPONSE_TOOL = {
   cache_control: { type: 'ephemeral' },
 };
 
-const SYSTEM_PROMPT = `You classify Indian bank/financial-vendor SMS a regex parser couldn't confidently resolve (amount unclear, direction unclear, template unrecognized, or a suspected future-tense promise the parser isn't certain about).
+const SYSTEM_PROMPT = `You classify Indian bank/financial-vendor SMS a regex parser couldn't confidently resolve (amount unclear, direction unclear, template unrecognized, or a suspected unconfirmed-money-movement notice the parser isn't certain about).
 
 For EACH message, include exactly one entry, tagged with its raw_sms_id. Do not skip any message, even ones you're confident are not transactions — always return an entry.
 
-First decide is_transaction: does this message show money that has moved, is about to move, or is being refunded — OR does it name a specific account, card, UPI ID, or reference/transaction number in that context? Either is enough. A price merely mentioned while describing a plan, offer, or reminder is NOT a transaction, even with a real amount.
+First decide is_transaction: does this message state a specific amount that has moved, is promised to move, or is being refunded? A price mentioned while describing a plan/offer/reminder is NOT a transaction. A mandate/AutoPay/SI REGISTRATION confirmation ("AutoPay Active!", "Mandate registered") is NOT a transaction — no amount has moved or been promised yet, only a standing instruction was set up. A mandate DEBIT (a stated amount, moved or promised) IS a transaction.
 
-If is_transaction is false, leave direction/amount/currency/merchant/is_provisional_notice/expected_confirmation_date null and give your confidence in that "not a transaction" call.
+If is_transaction is false, leave direction/amount/currency/merchant/is_provisional_notice/expected_confirmation_date null and give your confidence in that call.
 
 If is_transaction is true, also fill in:
   1. direction — "credit" or "debit". Null if unclear.
   2. amount — plain number, in the currency stated (do NOT convert — see currency). Null if unclear; never guess.
   3. currency — ISO 4217 code (e.g. "INR", "USD"). Default "INR" if unstated. Never estimate a conversion rate yourself.
   4. merchant — counterparty name if identifiable, else null.
-  5. is_provisional_notice — true only if future/promised ("will be debited"), false if already happened.
-  6. expected_confirmation_date — ONLY when is_provisional_notice is true: if the message states or clearly implies a specific date or window the money is expected to move by (e.g. "within 3-4 days", "on 22/08/26"), give that as an ISO date (YYYY-MM-DD). Otherwise null — do not guess a date the message doesn't support.
-  7. confidence — 0 to 1, your confidence in the extracted fields. Reserve 0.8+ for explicit transaction language; score lower if you're inferring from context rather than reading it directly.
+  5. is_provisional_notice — true if the money is NOT yet confirmed landed in the user's own bank account. Covers plain future tense ("will be debited/credited") AND vendor-side language that reads past-tense but only confirms the VENDOR's side, not the bank's — "payout processed", "refund initiated", "settlement completed" are all still provisional, since a separate bank-side confirmation is still pending. False only when the message itself IS that bank-side confirmation (e.g. "Rs.X debited from A/C", "Spent Rs.X", any bank alert stating the account was actually charged/credited).
+  6. expected_confirmation_date — ONLY when is_provisional_notice is true: an ISO date (YYYY-MM-DD) if the message states or clearly implies when the money should land (e.g. "within 3-4 days", "on 22/08/26"). Otherwise null — never guess a date the message doesn't support.
+  7. confidence — 0 to 1. Reserve 0.8+ for explicit language; lower if inferring from context.
 
 Use the return_classifications tool.`;
 

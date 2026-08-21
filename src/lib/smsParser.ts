@@ -491,6 +491,25 @@ export interface Classification {
 
 // ─── UPI infrastructure senders ──────────────────────────────────────────────
 
+// [ADD] See the future-tense guard in parseSingleSms() below for the full
+// rationale. Anchored on an explicit near-future auxiliary ("will"/"shall")
+// immediately followed by a settlement verb — deliberately NOT a bare
+// "will be" match, since that alone is too broad (e.g. threat/boilerplate
+// language like "will be blocked if..."). Extends the verb list already
+// used by PROVISIONAL_CREDIT_NOTICE in ruleset.js (credited/refunded/
+// processed) to also cover the debit-side verbs nothing previously caught.
+const FUTURE_TENSE_DEBIT_MARKER = /\b(?:will|shall)\s+be\s+(?:debited|credited|deducted|refunded|processed|withdrawn)\b/i;
+
+// [ADD] Duplicated from transactions.ts's PROVISIONAL_CREDIT_RULES —
+// see the future-tense guard's comment in parseSingleSms() for why this
+// isn't imported instead. Keep both lists in sync by hand.
+const PROVISIONAL_RULE_IDS = new Set([
+  'VENDOR_SETTLEMENT_NOTICE',
+  'PROVISIONAL_CREDIT_NOTICE',
+  'REFUND_INITIATED',
+  'PAYMENT_CONFIRMATION_NOTICE',
+]);
+
 const UPI_INFRA_SENDERS = ['NPCI', 'UPITRN', 'UPITXN', 'SBIPSG', 'HDFCPAY'];
 
 // ─── Bank keyword map ─────────────────────────────────────────────────────────
@@ -1742,6 +1761,54 @@ function parseSingleSms(msg: RawMessage, matchContext?: MatchContext, logs?: Par
   }
 
   if (l2 && !l2.discard) {
+    // [ADD] Generic future-tense guard — closes the Issue A class of bug
+    // (E-Mandate/vendor debit promises like "Rs.1300.00 will be deducted
+    // on 22/08/26" getting recorded as an already-happened transaction
+    // with the future date written in literally).
+    //
+    // The four existing deliberate provisional-notice rules
+    // (VENDOR_SETTLEMENT_NOTICE, PROVISIONAL_CREDIT_NOTICE, REFUND_INITIATED,
+    // PAYMENT_CONFIRMATION_NOTICE — see ruleset.js and
+    // transactions.ts's PROVISIONAL_CREDIT_RULES) already intercept
+    // future-tense CREDIT-side phrasing correctly. Nothing ever caught the
+    // DEBIT-side equivalent ("will be debited/deducted") — those messages
+    // fall straight into GENERIC_DEBIT/GENERIC_NACH, which bare-word-match
+    // "debited"/"deducted"/"mandate" with zero tense awareness.
+    //
+    // Deliberately generic (a verb-phrase shape, not a phrase-by-phrase
+    // list) so a brand-new vendor wording next month doesn't need its own
+    // hand-written rule — anything matching this shape gets a second look
+    // from Haiku instead of being trusted as a completed transaction.
+    // PROVISIONAL_RULE_IDS below is duplicated from transactions.ts's
+    // PROVISIONAL_CREDIT_RULES (not imported — importing across
+    // smsParser.ts/transactions.ts risks a circular dependency, since
+    // transactions.ts already imports from smsParser.ts). Keep the two in
+    // sync by hand if that set ever changes.
+    const alreadyHandledAsProvisional = l2.matched_rule != null && PROVISIONAL_RULE_IDS.has(l2.matched_rule);
+    if (!alreadyHandledAsProvisional && FUTURE_TENSE_DEBIT_MARKER.test(body)) {
+      // Reuses the existing 'escalated_to_haiku' reason rather than
+      // introducing a new enum value — this is a deliberate choice to
+      // avoid an unverified check-constraint change on
+      // haiku_candidate_log.reason (that column's constraint, if any,
+      // wasn't visible in what's been reviewed so far). Same downstream
+      // handling either way: a sibling pending_review row is created and
+      // the candidate is queued for Haiku's judgment.
+      const l2AsExtractedFields: ExtractedFields = {
+        amount:          l2.amount,
+        isCredit:        l2.direction === 'credit' ? true : l2.direction === 'debit' ? false : null,
+        accountLast4:    l2.account_number_masked,
+        merchant:        l2.merchant,
+        bank:            l2.bank,
+        channel:         l2.channel,
+        balance:         l2.balance ?? null,
+        ref_number:      l2.ref_number,
+        ref_type:        l2.ref_type,
+        reference_value: l2.reference_value,
+      };
+      logHaikuCandidate(logs, msg, msgDate, l2AsExtractedFields, 'escalated_to_haiku');
+      return buildEscalated(msg, msgDate, isInfra, l2AsExtractedFields, 'escalated_to_haiku');
+    }
+
     // [ADD — Log B, shadow only] Confidence gate runs here because this is
     // exactly the case it exists for: Layer 2 "successfully" matched
     // (amount/direction non-null, so matchMessage() didn't self-reject),
@@ -1865,6 +1932,23 @@ function parseSingleSms(msg: RawMessage, matchContext?: MatchContext, logs?: Par
   if (extracted.isCredit === null) {
     logHaikuCandidate(logs, msg, msgDate, extracted, 'unknown_direction');
     return buildEscalated(msg, msgDate, isInfra, extracted, 'unknown_direction');
+  }
+
+  // [ADD] Same future-tense guard as the Layer 2 branch above, extended to
+  // this second, independent path. This fallback extractor's own
+  // extractDirection() (below, in this file) recognizes "debited"/
+  // "deducted" the same tense-blind way GENERIC_DEBIT/GENERIC_NACH does —
+  // without this check, a message that happens to slip past Layer 2
+  // entirely (matchMessage() returns null) but is still fully resolvable
+  // here would bypass the Layer 2 guard, never reach haiku_candidate_log,
+  // and get silently recorded with a literal future date — the exact
+  // Issue A failure mode, via a different, previously-unprotected path.
+  // Checked against the real 1,112-message test corpus: zero live
+  // occurrences today, but the gap is structural, not hypothetical, so
+  // it's closed here rather than left for a future message to hit.
+  if (FUTURE_TENSE_DEBIT_MARKER.test(body)) {
+    logHaikuCandidate(logs, msg, msgDate, extracted, 'escalated_to_haiku');
+    return buildEscalated(msg, msgDate, isInfra, extracted, 'escalated_to_haiku');
   }
 
   const classification = classify(body.toLowerCase(), extracted.isCredit, extracted.amount, extracted.channel, extracted.merchant, msgDate, extracted.reference_value, matchContext);

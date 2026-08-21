@@ -561,6 +561,19 @@ const PROVISIONAL_CREDIT_RULES = new Set([
 // before tightening.
 const PROVISIONAL_CREDIT_RECONCILE_WINDOW_DAYS = 15;
 
+// [ADD] Default for the new expected_confirmation_date column, used only
+// when nothing more specific is available (a message's own stated window,
+// e.g. Haiku extracting "within 3-4 days" from real text, takes priority —
+// see haiku-collect/index.ts). Deliberately a flat, generous default for
+// every classic-rule-matched provisional row rather than trying to infer
+// per-vendor timing here — a starting point to tune once real data shows
+// typical resolution times per notice type.
+const EXPECTED_CONFIRMATION_DEFAULT_WINDOW_DAYS = 14;
+
+function computeDefaultExpectedConfirmationDate(txnDate: string): string {
+  return addDaysToDateString(txnDate, EXPECTED_CONFIRMATION_DEFAULT_WINDOW_DAYS);
+}
+
 // Called for every REAL (non-provisional) credit being inserted. Looks for
 // an earlier, still-outstanding provisional placeholder this credit could
 // be confirming, and — if found — soft-deletes it (never a hard DELETE,
@@ -644,6 +657,88 @@ async function findExistingConfirmingCredit(
 
   if (error) throw error;
   return !!(data && data.length > 0);
+}
+
+// [ADD] Repeating sweep for open provisional notices — closes the timing
+// gap reconcileProvisionalCredit()/findExistingConfirmingCredit() both
+// have: those only ever check ONCE, at the exact moment a new transaction
+// is inserted. If a placeholder's real confirmation hasn't synced in yet
+// at that instant, it's never rechecked again — confirmed against real
+// data (a provisional Anthropic USD notice whose real confirming debit
+// arrived two days later, never reconciled). This function re-attempts
+// the match for every currently-open placeholder, meant to be called once
+// per sync, not just reactively.
+//
+// Scope, deliberately: only rows with a real (non-null) `amount` — i.e.
+// classic-rule-matched INR provisional notices, which is what this file's
+// parser can ever produce (see ruleset.js/smsParser.ts — non-INR amounts
+// are never extracted client-side at all). Foreign-currency provisional
+// rows (amount left null by design) are Haiku-sourced and swept
+// independently, server-side, in haiku-collect/index.ts, which has the
+// original foreign face-value amount (from haiku_response) needed for a
+// cross-currency tolerance match this file has no way to attempt.
+//
+// Matching stays exact-amount only (same as reconcileProvisionalCredit
+// above) — deliberately NOT loosened to fuzzy/merchant-based matching
+// here, so this sweep's auto-hide behavior is a strict continuation of
+// what already works today, not a new, untested confidence path.
+export async function sweepOpenProvisionalNotices(userId: string): Promise<{ resolved: number; expired: number }> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: openRows, error } = await supabase
+    .from('transactions')
+    .select('id, txn_date, amount, expected_confirmation_date')
+    .eq('user_id', userId)
+    .eq('parse_failure', 'awaiting_bank_confirmation')
+    .eq('is_deleted', false)
+    .not('amount', 'is', null);
+
+  if (error) throw error;
+  if (!openRows || openRows.length === 0) return { resolved: 0, expired: 0 };
+
+  let resolved = 0;
+  let expired = 0;
+
+  for (const row of openRows) {
+    // Exact-amount match against a real, already-confirmed transaction —
+    // any time from this placeholder's own date up to today, not just a
+    // fixed backward window, since this is a sweep across time rather
+    // than a one-shot check anchored to one new insert.
+    const { data: matches, error: matchError } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('amount', row.amount)
+      .eq('is_deleted', false)
+      .is('parse_failure', null)
+      .gte('txn_date', row.txn_date)
+      .lte('txn_date', today)
+      .limit(1);
+
+    if (matchError) throw matchError;
+
+    if (matches && matches.length > 0) {
+      await supabase.from('transactions').update({ is_deleted: true }).eq('id', row.id);
+      resolved++;
+      continue;
+    }
+
+    // No match yet. If the message's own (or default) expected window has
+    // passed, stop treating this as "still waiting" — flip to a distinct,
+    // visible terminal state instead of leaving it in limbo forever. Same
+    // parse_failure column, new value — no schema change beyond the one
+    // new date column this depends on. This is what directly answers the
+    // "some vendors' bank confirmation never arrives at all" case (e.g.
+    // a broker settlement with no separate bank-side credit SMS): instead
+    // of sitting at awaiting_bank_confirmation indefinitely, it becomes a
+    // clear, actionable item for the user once its window has passed.
+    if (row.expected_confirmation_date && today > row.expected_confirmation_date) {
+      await supabase.from('transactions').update({ parse_failure: 'unconfirmed_expired' }).eq('id', row.id);
+      expired++;
+    }
+  }
+
+  return { resolved, expired };
 }
 
 // [ADD] The one case that's safe to treat as a TRUE skip — not a flag.
@@ -995,6 +1090,12 @@ async function insertTransaction(txn: ParsedTransaction, userId: string): Promis
     // provisional or not) — this is what reconcileProvisionalCredit()
     // above searches for later.
     parse_failure:         isProvisionalCredit ? 'awaiting_bank_confirmation' : txn.parse_failure,
+    // [ADD] Only these classic-rule-matched rows are set here — the
+    // Haiku-sourced provisional path (haiku-collect/index.ts) sets this
+    // independently, using the message's own stated window when Haiku can
+    // extract one, falling back to the same 14-day default otherwise. See
+    // sweepOpenProvisionalNotices() below for what reads this column.
+    expected_confirmation_date: isProvisionalCredit ? computeDefaultExpectedConfirmationDate(txn.txn_date) : null,
   }).select('id').single();
 
   if (error) {
@@ -1475,6 +1576,18 @@ export async function ingestParsedMessages(
     // chunk stays comparable to before while chunk boundaries also double
     // as the cache-persistence points above.
     await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  // [ADD] Runs once per sync, after every item in this run has been
+  // processed — not per-item, since it re-scans ALL of this user's
+  // currently-open provisional rows regardless of whether this specific
+  // sync touched them. Failure here must never fail the sync itself (a
+  // transient network blip on this pass just means the next sync retries
+  // the same open rows — nothing is lost by deferring).
+  try {
+    await sweepOpenProvisionalNotices(userId);
+  } catch (e) {
+    console.warn('ingestParsedMessages: sweepOpenProvisionalNotices failed:', getErrorMessage(e));
   }
 
   return result;

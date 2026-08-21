@@ -55,6 +55,39 @@
 //   If this drifts from the real transactions.ts implementation over
 //   time, this file needs manual re-syncing — there is no shared source
 //   of truth between them.
+//
+// [CHANGED — provisional-notice generalization pass] Three additions:
+//   1. Classification now carries expected_confirmation_date (see
+//      haiku-submit's updated schema/prompt) — written onto the
+//      transactions row so sweepOpenProvisionalNotices() below (and its
+//      client-side counterpart in transactions.ts) knows when to give up
+//      waiting, instead of every provisional row sitting open forever.
+//   2. checkProvisionalNotice() is replaced by findConfirmingMatch() —
+//      previously, the provisional-linking check was gated on
+//      `signedAmount !== null`, which is FALSE for every foreign-currency
+//      notice by construction (amount is deliberately left null for
+//      non-INR — see the CURRENCY comment in applyResult() below) — so
+//      foreign-currency provisional notices were silently never checked
+//      for a match AT ALL, ever. This was the root cause of the real USD
+//      Anthropic duplicate found in testing. findConfirmingMatch() now
+//      also attempts a cross-currency TOLERANCE match using a static
+//      approximate rate, purely for matching purposes — never written to
+//      `amount`. This path scores a deliberately lower confidence than
+//      an exact same-currency match, and — same as before — only ever
+//      SUGGESTS (possible_duplicate_of), never auto-hides. Auto-hide
+//      stays reserved for the exact-match case only, consistent with
+//      what already runs safely today.
+//   3. sweepOpenProvisionalNotices() — a new function, called once per
+//      invocation of this schedule, that re-attempts findConfirmingMatch()
+//      for every currently-open provisional row across ALL users, and
+//      expires (parse_failure -> 'unconfirmed_expired') any row whose
+//      expected_confirmation_date has passed with nothing found. This
+//      closes the "only ever checked once, at insert time" gap, and —
+//      deliberately — runs here, server-side, independent of the mobile
+//      app's client-side sync/background-task cadence, since that path's
+//      reliability is currently unconfirmed (Android background execution
+//      is best-effort; see backgroundSync.ts). Provisional-notice
+//      resolution should not depend on that being fixed.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
@@ -67,6 +100,39 @@ const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 // re-derived, so behavior is consistent between the deterministic path
 // and this Haiku-sourced path.
 const PROVISIONAL_RECONCILE_WINDOW_DAYS = 15;
+
+// [ADD] Default for expected_confirmation_date when Haiku's own extraction
+// comes back null (message states no explicit timeframe). Kept identical
+// to transactions.ts's EXPECTED_CONFIRMATION_DEFAULT_WINDOW_DAYS so a row's
+// expiry behavior doesn't depend on which path (classic rule vs Haiku)
+// happened to create it.
+const EXPECTED_CONFIRMATION_DEFAULT_WINDOW_DAYS = 14;
+
+// [ADD] Rough, static approximate rates — for MATCHING TOLERANCE ONLY.
+// Never written to `transactions.amount`; real currency conversion (an
+// actual FX-rate lookup, actual converted value persisted) is explicitly
+// deferred, separate, larger scope. This exists purely so "USD 23.60"
+// and "INR 2258.63" can be recognized as plausibly the same real-world
+// charge for matching purposes.
+// [CALIBRATED] USD value checked against the two real historical
+// Anthropic-subscription cases (23.60 USD confirmed at 2275.33 INR and
+// 2258.63 INR — implied effective rate ~95.7-96.4, i.e. real card-network
+// rate + markup). 92 centers both cases with a healthy, roughly balanced
+// margin either side of the tolerance band; the original guess of 88 only
+// caught them within ~5% of the band's edge. EUR/GBP are still uncalibrated
+// starting guesses — tighten with real data once observed.
+const APPROX_INR_RATE: Record<string, number> = {
+  USD: 92,
+  EUR: 95,
+  GBP: 112,
+};
+
+// [ADD] Generous band around the approximate rate above, to absorb real
+// card-network conversion markup (typically 1-3.5%) plus day-to-day rate
+// drift between the provisional notice's date and the actual charge date.
+// A starting point, not a validated figure — same honest caveat as every
+// other confidence threshold introduced this pass.
+const FX_MATCH_TOLERANCE = 0.15;
 
 // [ADD] A mechanical backstop independent of prompt wording. Real
 // example that motivated this: a promotional plan-description SMS
@@ -90,6 +156,19 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// [ADD] Basic ISO-date shape check — Haiku is asked for YYYY-MM-DD but
+// nothing stops a malformed or hallucinated value from coming back; a bad
+// date here silently breaks every downstream comparison, so validate and
+// fall back to the flat default rather than trust it blindly (same
+// "validate/coerce, never trust model output shape" principle already
+// used throughout this file and layer3_haiku.js).
+function normaliseExpectedDate(raw: string | null, txnDate: string): string {
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) && !isNaN(new Date(raw + 'T00:00:00Z').getTime())) {
+    return raw;
+  }
+  return addDays(txnDate, EXPECTED_CONFIRMATION_DEFAULT_WINDOW_DAYS);
+}
+
 interface CandidateRow {
   id: string;
   user_id: string;
@@ -107,6 +186,8 @@ interface Classification {
   currency: string | null;
   merchant: string | null;
   is_provisional_notice: boolean | null;
+  // [ADD] See haiku-submit's updated schema — ISO date string or null.
+  expected_confirmation_date: string | null;
   confidence: number;
 }
 
@@ -160,32 +241,74 @@ async function reCheckContra(supabase: any, txnId: string): Promise<void> {
   }
 }
 
-// New — the "ask Haiku itself" provisional-notice check from the design
-// chat. Deliberately NOT calling reconcileProvisionalCredit()/
+// [CHANGED — replaces checkProvisionalNotice()] Looks for an existing,
+// already-confirmed real transaction that this provisional notice might
+// be describing. Two paths:
+//
+//   - Same-currency (INR) exact amount match — identical to the old
+//     checkProvisionalNotice()'s only path, unchanged behavior, same
+//     0.7 confidence score kept for continuity.
+//   - Cross-currency tolerance match — NEW. Only reached when no INR
+//     amount is available (foreignAmount/foreignCurrency given instead).
+//     Uses the static APPROX_INR_RATE + FX_MATCH_TOLERANCE band above.
+//     Scores a deliberately LOWER 0.5 confidence — a weaker signal than
+//     an exact match, still routed through the same suggest-only
+//     (possible_duplicate_of) flow, never auto-hidden.
+//
+// Deliberately NOT calling reconcileProvisionalCredit()/
 // findExistingConfirmingCredit() (same cross-runtime reason as contra
-// detection above), and deliberately NOT auto-hiding on a match — this
-// links via possible_duplicate_of and leaves the row pending_review, so
-// a human confirms/dismisses through the existing duplicate-review UI,
-// rather than trusting an untested Haiku judgment to silently delete a
-// transaction. Auto-hide can be revisited once real data shows this
-// classification is reliable.
-async function checkProvisionalNotice(supabase: any, userId: string, txnDate: string, amount: number): Promise<string | null> {
-  const latestDate = addDays(txnDate, PROVISIONAL_RECONCILE_WINDOW_DAYS);
+// detection above — no session to depend on here).
+async function findConfirmingMatch(
+  supabase: any,
+  userId: string,
+  txnDate: string,
+  opts: { inrAmount: number | null; foreignAmount: number | null; foreignCurrency: string | null },
+): Promise<{ id: string; confidence: number } | null> {
   const earliestDate = addDays(txnDate, -PROVISIONAL_RECONCILE_WINDOW_DAYS);
+  const latestDate = addDays(txnDate, PROVISIONAL_RECONCILE_WINDOW_DAYS);
 
-  const { data } = await supabase
-    .from('transactions')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('amount', amount)
-    .eq('is_deleted', false)
-    .is('parse_failure', null) // a real, already-confirmed transaction, not another placeholder
-    .gte('txn_date', earliestDate)
-    .lte('txn_date', latestDate)
-    .order('created_at', { ascending: true })
-    .limit(1);
+  if (opts.inrAmount !== null) {
+    const { data } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('amount', opts.inrAmount)
+      .eq('is_deleted', false)
+      .is('parse_failure', null)
+      .gte('txn_date', earliestDate)
+      .lte('txn_date', latestDate)
+      .order('created_at', { ascending: true })
+      .limit(1);
 
-  return data && data.length > 0 ? data[0].id : null;
+    return data && data.length > 0 ? { id: data[0].id, confidence: 0.7 } : null;
+  }
+
+  // [ADD] Cross-currency path — the previously-always-skipped case.
+  if (opts.foreignAmount !== null && opts.foreignCurrency) {
+    const rate = APPROX_INR_RATE[opts.foreignCurrency.toUpperCase()];
+    if (!rate) return null; // unrecognized currency — no safe tolerance to apply, don't guess
+
+    const approxInr = opts.foreignAmount * rate;
+    const low = approxInr * (1 - FX_MATCH_TOLERANCE);
+    const high = approxInr * (1 + FX_MATCH_TOLERANCE);
+
+    const { data } = await supabase
+      .from('transactions')
+      .select('id, amount')
+      .eq('user_id', userId)
+      .eq('is_deleted', false)
+      .is('parse_failure', null)
+      .gte('txn_date', earliestDate)
+      .lte('txn_date', latestDate)
+      .gte('amount', low)
+      .lte('amount', high)
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    return data && data.length > 0 ? { id: data[0].id, confidence: 0.5 } : null;
+  }
+
+  return null;
 }
 
 async function applyResult(supabase: any, candidate: CandidateRow, result: Classification, usage: Record<string, unknown>): Promise<void> {
@@ -262,6 +385,11 @@ async function applyResult(supabase: any, candidate: CandidateRow, result: Class
       if (result.is_provisional_notice) {
         updatePayload.parse_failure = 'awaiting_bank_confirmation';
         updatePayload.status = 'pending_review'; // keep visible + reviewable, don't auto-hide
+        // [ADD] Written regardless of currency — this is what
+        // sweepOpenProvisionalNotices() (and transactions.ts's client-side
+        // counterpart, for the INR case) uses to know when to give up
+        // waiting and expire the row instead of leaving it open forever.
+        updatePayload.expected_confirmation_date = normaliseExpectedDate(result.expected_confirmation_date, candidate.txn_date);
       }
 
       const { data: updated, error: updateError } = await supabase
@@ -280,17 +408,30 @@ async function applyResult(supabase: any, candidate: CandidateRow, result: Class
         return;
       }
 
-      if (result.is_provisional_notice && signedAmount !== null) {
-        const matchId = await checkProvisionalNotice(supabase, candidate.user_id, candidate.txn_date, signedAmount);
-        if (matchId) {
+      if (result.is_provisional_notice) {
+        // [FIX] Previously gated on `signedAmount !== null` — which is
+        // ALWAYS false for a foreign-currency notice by construction (see
+        // the CURRENCY comment above), meaning every non-INR provisional
+        // notice silently skipped this check entirely, forever. This is
+        // the confirmed root cause of the real USD Anthropic duplicate
+        // found in testing. Now always attempts a match — same-currency
+        // exact, or cross-currency tolerance, per findConfirmingMatch().
+        const match = await findConfirmingMatch(supabase, candidate.user_id, candidate.txn_date, {
+          inrAmount: signedAmount,
+          foreignAmount: isForeignCurrency ? result.amount : null,
+          foreignCurrency: isForeignCurrency ? result.currency : null,
+        });
+        if (match) {
           await supabase.from('transactions').update({
-            possible_duplicate_of: matchId, duplicate_confidence: 0.7,
+            possible_duplicate_of: match.id, duplicate_confidence: match.confidence,
           }).eq('id', sibling.id);
         }
         // No match yet: row stays parse_failure='awaiting_bank_confirmation',
-        // pending_review. The app's EXISTING reconcileProvisionalCredit()
-        // will find and resolve it automatically once the real confirming
-        // transaction syncs in later — no new code needed for that half.
+        // pending_review, with expected_confirmation_date set above. Either
+        // this file's own sweepOpenProvisionalNotices() (server-side,
+        // periodic) or the app's client-side sweep (INR case only) will
+        // keep re-attempting the match on future runs, and will expire it
+        // if expected_confirmation_date passes with nothing found.
       } else {
         await reCheckContra(supabase, sibling.id);
       }
@@ -302,12 +443,18 @@ async function applyResult(supabase: any, candidate: CandidateRow, result: Class
     }
 
     // Step 2: no sibling — Layer-1 origin. Insert-or-drop, no complex checks.
-    if (signedAmount === null) {
+    if (signedAmount === null && !result.is_provisional_notice) {
       await supabase.from('haiku_candidate_log').update({
         haiku_status: 'dropped_unresolvable', haiku_response: responsePayload, haiku_processed_at: new Date().toISOString(),
       }).eq('id', candidate.id);
       return;
     }
+    // [NOTE] A provisional notice with no sibling and a foreign amount
+    // (signedAmount null but is_provisional_notice true) still inserts
+    // below with amount: null — same "every parsed message always
+    // produces exactly one row" principle as everywhere else in this
+    // pipeline, not silently dropped just because the amount can't be
+    // written yet.
 
     const { error: insertError } = await supabase.from('transactions').insert({
       user_id: candidate.user_id,
@@ -320,14 +467,19 @@ async function applyResult(supabase: any, candidate: CandidateRow, result: Class
       merchant: result.merchant,
       merchant_key: normaliseMerchantKey(result.merchant),
       source: 'sms',
-      status: 'haiku_suggested',
+      status: result.is_provisional_notice ? 'pending_review' : 'haiku_suggested',
       raw_text: candidate.raw_text,
       raw_sms_id: candidate.raw_sms_id,
       is_deleted: false,
       added_late: false,
       is_contra: false,
       is_infrastructure: false,
-      parse_failure: null,
+      parse_failure: result.is_provisional_notice ? 'awaiting_bank_confirmation' : null,
+      // [ADD] Same as the sibling-update path above — written whenever
+      // this row is provisional, regardless of currency.
+      expected_confirmation_date: result.is_provisional_notice
+        ? normaliseExpectedDate(result.expected_confirmation_date, candidate.txn_date)
+        : null,
     });
 
     if (insertError) throw insertError;
@@ -343,6 +495,90 @@ async function applyResult(supabase: any, candidate: CandidateRow, result: Class
   }
 }
 
+// [ADD] Server-side repeating sweep — see file header for why this lives
+// here rather than relying solely on the app's client-side sync. Runs
+// once per invocation, across ALL users (this function has the
+// service-role key; there's no per-user session to scope it by, so it
+// deliberately queries unscoped and loops).
+//
+// Covers both origins that share the parse_failure = 'awaiting_bank_confirmation'
+// convention:
+//   - Rows with a real amount (INR, either classic-rule-matched or a
+//     Haiku-resolved INR provisional notice) — exact-match, same as
+//     transactions.ts's client-side sweep. On an exact match, this DOES
+//     auto-hide (is_deleted: true) — same confidence tier as the existing,
+//     already-trusted exact-match path, so it's held to the same bar.
+//   - Rows with amount left null (foreign-currency, Haiku-sourced only —
+//     the classic client parser never produces these) — recovers the
+//     original foreign amount/currency by joining back to
+//     haiku_candidate_log via (user_id, raw_sms_id, raw_text), the same
+//     identity key this file already uses elsewhere, then attempts the
+//     cross-currency tolerance match. Only ever suggests
+//     (possible_duplicate_of), never auto-hides — same as the immediate
+//     applyResult() path.
+async function sweepOpenProvisionalNotices(supabase: any): Promise<{ resolved: number; suggested: number; expired: number }> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: openRows, error } = await supabase
+    .from('transactions')
+    .select('id, user_id, txn_date, amount, raw_sms_id, raw_text, expected_confirmation_date, possible_duplicate_of')
+    .eq('parse_failure', 'awaiting_bank_confirmation')
+    .eq('is_deleted', false);
+
+  if (error) throw error;
+  if (!openRows || openRows.length === 0) return { resolved: 0, suggested: 0, expired: 0 };
+
+  let resolved = 0, suggested = 0, expired = 0;
+
+  for (const row of openRows) {
+    let match: { id: string; confidence: number } | null = null;
+
+    if (row.amount !== null) {
+      match = await findConfirmingMatch(supabase, row.user_id, row.txn_date, {
+        inrAmount: row.amount, foreignAmount: null, foreignCurrency: null,
+      });
+      if (match) {
+        // Exact same-currency match — same confidence tier as the
+        // already-trusted path, auto-hide directly.
+        await supabase.from('transactions').update({ is_deleted: true }).eq('id', row.id);
+        resolved++;
+        continue;
+      }
+    } else if (row.raw_sms_id && row.raw_text) {
+      // Foreign-currency row — recover the original amount/currency from
+      // the log, since transactions.amount was deliberately left null.
+      const { data: logRow } = await supabase
+        .from('haiku_candidate_log')
+        .select('haiku_response')
+        .eq('user_id', row.user_id)
+        .eq('raw_sms_id', row.raw_sms_id)
+        .eq('raw_text', row.raw_text)
+        .maybeSingle();
+
+      const classification = logRow?.haiku_response?.classification;
+      if (classification?.amount != null && classification?.currency) {
+        match = await findConfirmingMatch(supabase, row.user_id, row.txn_date, {
+          inrAmount: null, foreignAmount: classification.amount, foreignCurrency: classification.currency,
+        });
+        if (match && !row.possible_duplicate_of) {
+          await supabase.from('transactions').update({
+            possible_duplicate_of: match.id, duplicate_confidence: match.confidence,
+          }).eq('id', row.id);
+          suggested++;
+          continue;
+        }
+      }
+    }
+
+    if (!match && row.expected_confirmation_date && today > row.expected_confirmation_date) {
+      await supabase.from('transactions').update({ parse_failure: 'unconfirmed_expired' }).eq('id', row.id);
+      expired++;
+    }
+  }
+
+  return { resolved, suggested, expired };
+}
+
 Deno.serve(async () => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -354,9 +590,6 @@ Deno.serve(async () => {
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
 
   const batchIds = [...new Set((sentRows ?? []).map((r: any) => r.haiku_batch_id).filter(Boolean))];
-  if (batchIds.length === 0) {
-    return new Response(JSON.stringify({ message: 'no in-flight batches' }), { status: 200 });
-  }
 
   let processedBatches = 0, processedCandidates = 0;
 
@@ -437,5 +670,19 @@ Deno.serve(async () => {
     processedBatches++;
   }
 
-  return new Response(JSON.stringify({ batches_processed: processedBatches, candidates_processed: processedCandidates }), { status: 200 });
+  // [ADD] Runs every invocation, regardless of whether there were any
+  // in-flight batches this run — this is what makes provisional-notice
+  // resolution independent of new candidates arriving, closing the
+  // "only checked once, at insert time" gap for good.
+  let sweepResult = { resolved: 0, suggested: 0, expired: 0 };
+  try {
+    sweepResult = await sweepOpenProvisionalNotices(supabase);
+  } catch (e) {
+    console.error('sweepOpenProvisionalNotices failed:', (e as Error)?.message ?? e);
+  }
+
+  return new Response(
+    JSON.stringify({ batches_processed: processedBatches, candidates_processed: processedCandidates, sweep: sweepResult }),
+    { status: 200 },
+  );
 });

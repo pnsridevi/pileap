@@ -210,9 +210,26 @@ const EMPTY_RESULT: SmsSyncResult = {
   newestSyncedMessageDate: null,
 };
 
+// [FIX] Was supabase.auth.getUser() — that call always makes a network
+// round-trip to Supabase's auth server to revalidate the token, even
+// though the result is only ever used to tag a sync/watermark with a
+// user_id, not to make an authorization decision (RLS on the server
+// enforces real access control regardless). Android restricts background
+// network access outside Doze maintenance windows, so this call can hang
+// well past the background task's execution budget when invoked from
+// backgroundSync.ts — the task then gets killed by the OS before it ever
+// reaches a logBackgroundSyncEvent('task_succeeded'/'task_failed') call,
+// which matches the observed symptom exactly: 'task_invoked' logs (that
+// one happens before this function is ever called), then nothing further.
+// getSession() reads the already-cached session from local storage, no
+// network required — the same call backgroundSyncLog.ts's own auth check
+// already uses successfully in this exact background context. This is
+// called at the very top of every sync (foreground and background), so
+// this also removes an unnecessary network hit from every manual/on-open
+// sync too, not just the background path.
 async function getCurrentUserIdOrNull(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user?.id ?? null;
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.user?.id ?? null;
 }
 
 /** [FIX] Was reading/writing the same key syncRecentSmsMessages() uses to

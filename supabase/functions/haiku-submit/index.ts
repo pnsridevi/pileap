@@ -17,6 +17,23 @@
 // with pipeline_test.js/comparison_test.js and scoped narrowly to
 // "classify an unrecognized template." Zero shared code, zero risk to
 // the existing call.
+//
+// [CHANGED — provisional-notice generalization pass] Two additions, both
+// additive to the existing schema/prompt, nothing removed:
+//   1. expected_confirmation_date — when is_provisional_notice is true,
+//      Haiku now also extracts whatever timeframe the message itself
+//      states ("within 3-4 days", "on 22/08/26"), so haiku-collect can
+//      write a real per-message expiry instead of always falling back to
+//      a flat default. Null when the message states no timeframe, or
+//      when is_provisional_notice is false/null — haiku-collect applies
+//      the same 14-day default transactions.ts's classic-rule path uses
+//      in that case, so behavior stays consistent across both origins.
+//   2. The escalation source now also includes messages flagged by
+//      smsParser.ts's new future-tense debit guard (see that file) —
+//      these arrive with reason: 'escalated_to_haiku', an existing,
+//      already-handled value; no change needed here for that part, this
+//      function already treats every 'pending' row identically regardless
+//      of reason.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
@@ -80,9 +97,18 @@ const RESPONSE_TOOL = {
             // debited')" — used by haiku-collect to decide whether to run
             // the provisional-notice linking check.
             is_provisional_notice: { type: ['boolean', 'null'] },
+            // [ADD] Only meaningful when is_provisional_notice is true.
+            // ISO 8601 date string (YYYY-MM-DD) if the message states or
+            // implies a specific date/window the money is expected to
+            // move by (e.g. "within 3-4 days" of the message's own date,
+            // "on 22/08/26"). Null if is_provisional_notice is false/null,
+            // or if it's true but no timeframe is stated in the text —
+            // haiku-collect falls back to a flat default in that case,
+            // never guesses one here.
+            expected_confirmation_date: { type: ['string', 'null'] },
             confidence: { type: 'number' },
           },
-          required: ['raw_sms_id', 'is_transaction', 'direction', 'amount', 'currency', 'merchant', 'is_provisional_notice', 'confidence'],
+          required: ['raw_sms_id', 'is_transaction', 'direction', 'amount', 'currency', 'merchant', 'is_provisional_notice', 'expected_confirmation_date', 'confidence'],
         },
       },
     },
@@ -103,13 +129,13 @@ const RESPONSE_TOOL = {
   cache_control: { type: 'ephemeral' },
 };
 
-const SYSTEM_PROMPT = `You classify Indian bank/financial-vendor SMS a regex parser couldn't confidently resolve (amount unclear, direction unclear, or template unrecognized).
+const SYSTEM_PROMPT = `You classify Indian bank/financial-vendor SMS a regex parser couldn't confidently resolve (amount unclear, direction unclear, template unrecognized, or a suspected future-tense promise the parser isn't certain about).
 
 For EACH message, include exactly one entry, tagged with its raw_sms_id. Do not skip any message, even ones you're confident are not transactions — always return an entry.
 
 First decide is_transaction: does this message show money that has moved, is about to move, or is being refunded — OR does it name a specific account, card, UPI ID, or reference/transaction number in that context? Either is enough. A price merely mentioned while describing a plan, offer, or reminder is NOT a transaction, even with a real amount.
 
-If is_transaction is false, leave direction/amount/currency/merchant/is_provisional_notice null and give your confidence in that "not a transaction" call.
+If is_transaction is false, leave direction/amount/currency/merchant/is_provisional_notice/expected_confirmation_date null and give your confidence in that "not a transaction" call.
 
 If is_transaction is true, also fill in:
   1. direction — "credit" or "debit". Null if unclear.
@@ -117,7 +143,8 @@ If is_transaction is true, also fill in:
   3. currency — ISO 4217 code (e.g. "INR", "USD"). Default "INR" if unstated. Never estimate a conversion rate yourself.
   4. merchant — counterparty name if identifiable, else null.
   5. is_provisional_notice — true only if future/promised ("will be debited"), false if already happened.
-  6. confidence — 0 to 1, your confidence in the extracted fields. Reserve 0.8+ for explicit transaction language; score lower if you're inferring from context rather than reading it directly.
+  6. expected_confirmation_date — ONLY when is_provisional_notice is true: if the message states or clearly implies a specific date or window the money is expected to move by (e.g. "within 3-4 days", "on 22/08/26"), give that as an ISO date (YYYY-MM-DD). Otherwise null — do not guess a date the message doesn't support.
+  7. confidence — 0 to 1, your confidence in the extracted fields. Reserve 0.8+ for explicit transaction language; score lower if you're inferring from context rather than reading it directly.
 
 Use the return_classifications tool.`;
 

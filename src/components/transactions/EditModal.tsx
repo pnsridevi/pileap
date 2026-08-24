@@ -42,7 +42,7 @@
  * Button don't fit them.
  */
 import { useEffect, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Alert } from 'react-native';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
 import type { Transaction, TransactionEdit } from '@/lib/api/transactions';
 import { TAXONOMY, TxnType, signedAmount } from '@/constants/transactionTaxonomy';
@@ -62,9 +62,15 @@ interface Props {
    * this modal directly, same reasoning as the transaction edit itself —
    * this component stays a pure form, the parent owns all persistence. */
   onSave: (edit: TransactionEdit, saveCustomCategory: boolean) => void;
+  /** [ADD] Called after the user confirms deletion inside this modal — the
+   * confirm step lives here (it's part of the form's own UI flow), but the
+   * actual deleteTransaction() call and the resulting close+refresh stay
+   * with the parent, same "this component stays a pure form, the parent
+   * owns all persistence" convention onSave already follows above. */
+  onDelete: (transaction: Transaction) => void;
 }
 
-export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
+export function EditModal({ visible, transaction, onCancel, onSave, onDelete }: Props) {
   const [txnDate, setTxnDate] = useState('');
   const [amountText, setAmountText] = useState('');
   const [type, setType] = useState<TxnType>('Expense');
@@ -261,6 +267,21 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
     onSave(edit, saveCustom);
   };
 
+  // [ADD] Confirm lives here since it's part of this form's own UI flow —
+  // the actual delete (deleteTransaction() call, closing the modal,
+  // refreshing the list) is the parent's job via onDelete(), same
+  // "form proposes, parent disposes" split as handleSave()/onSave() above.
+  const handleDeletePress = () => {
+    Alert.alert(
+      'Delete this transaction?',
+      'This removes it from your transactions and totals. Useful for a double-count (e.g. a payment notice and its confirmation both showing up) — not for transactions that genuinely happened.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => onDelete(transaction) },
+      ],
+    );
+  };
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
       <View style={styles.overlay}>
@@ -268,8 +289,9 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>Edit Transaction</Text>
             <Text style={styles.subtitle}>
-              Update the type, category, or details for this transaction. Financial data can't be deleted or
-              rejected — only corrected.
+              Update the type, category, or details for this transaction — correcting is usually right for a
+              transaction that genuinely happened. Use Delete below only to remove a double-count (financial
+              records are never hard-deleted; it's reversible, not a rewrite of history).
             </Text>
 
             {/* [ADD] Requested explicitly: showing the source SMS right here,
@@ -462,6 +484,15 @@ export function EditModal({ visible, transaction, onCancel, onSave }: Props) {
                 no-op on an invalid save. */}
             {formError && <Text style={styles.formError}>{formError}</Text>}
 
+            {/* [ADD] Deliberately its own row, not a third footer button
+                alongside Cancel/Save — this is a different kind of action
+                (immediate, real, confirmed) than Save (drafted, applied on
+                page Submit — arch doc 5.3.3), and shouldn't read as equal-
+                weight with it. */}
+            <TouchableOpacity onPress={handleDeletePress} hitSlop={8} style={styles.deleteRow}>
+              <Text style={styles.deleteRowText}>Delete this transaction</Text>
+            </TouchableOpacity>
+
             <View style={styles.footer}>
               <Button label="Cancel" variant="ghost" onPress={onCancel} />
               <Button label="Save Changes" variant="primary" onPress={handleSave} />
@@ -610,6 +641,17 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.red,
     marginTop: spacing.sm,
+  },
+  // [ADD] Styling to match TransactionRow's own delete link (same red,
+  // same intent) — kept consistent across both places delete now lives.
+  deleteRow: {
+    alignSelf: 'center',
+    marginTop: spacing.lg,
+  },
+  deleteRowText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.red,
   },
   footer: {
     flexDirection: 'row',

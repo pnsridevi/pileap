@@ -41,7 +41,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, fontSize, fontWeight } from '@/constants/theme';
@@ -59,6 +59,7 @@ import {
   hasAnyTransactions,
   submitTransactionPage,
   reconcilePendingTransactions,
+  deleteTransaction,
   type Transaction,
   type TransactionEdit,
   type TransactionSplit,
@@ -170,6 +171,28 @@ export default function TransactionsFeedScreen() {
   // status (e.g. clears pending_review), which can move needsReviewCount.
   // Dropping the counts refresh here would have been a real regression.
   const handleContraResolved = useCallback(async () => {
+    await Promise.all([refreshFeed(), loadCounts()]);
+  }, [refreshFeed, loadCounts]);
+
+  // [CHANGED] Was wired to TransactionRow's row-level onDeleted (a link
+  // was on every row alongside Split). Per updated direction, Feed's
+  // delete now lives inside EditModal instead — reached via the same tap
+  // that already opens Edit, not a second control on the row itself.
+  // EditModal's onDelete hands back the transaction after its own confirm
+  // step already ran; this is the first place that actually calls
+  // deleteTransaction() for the Feed path (EditModal stays a pure form,
+  // same "parent owns all persistence" convention as onSave/handleSaveEdit
+  // above). Same feed+counts refresh as handleContraResolved, same reason
+  // — deleting can change needsReviewCount (e.g. deleting a pending_review
+  // row).
+  const handleDeleteFromModal = useCallback(async (transaction: Transaction) => {
+    setEditingTxn(null);
+    try {
+      await deleteTransaction(transaction.id);
+    } catch (e: any) {
+      Alert.alert('Couldn\u2019t delete', e?.message ?? 'Please try again.');
+      return;
+    }
     await Promise.all([refreshFeed(), loadCounts()]);
   }, [refreshFeed, loadCounts]);
 
@@ -354,6 +377,10 @@ export default function TransactionsFeedScreen() {
           )
         }
         renderItem={({ item }) => (
+          // [REMOVED] onDeleted row-level link — Delete now lives inside
+          // EditModal for Feed (see below), reached via the same tap that
+          // already opens Edit. History has no Edit yet, so it keeps the
+          // row-level link.
           <TransactionRow
             transaction={mapTransactionToRow(item.txn)}
             isEdited={item.isEdited}
@@ -397,6 +424,7 @@ export default function TransactionsFeedScreen() {
         visible={!!editingTxn}
         transaction={editingTxn}
         onCancel={() => setEditingTxn(null)}
+        onDelete={handleDeleteFromModal}
         onSave={handleSaveEdit}
       />
       <SplitFlow

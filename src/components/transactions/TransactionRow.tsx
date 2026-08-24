@@ -22,7 +22,7 @@
  * a considered choice to duplicate logic.
  */
 import { useEffect, useState } from 'react';
-import { Pressable, View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { Pressable, View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { colors, spacing, fontSize, fontWeight } from '@/constants/theme';
 import { getCategory } from '@/constants/categories';
 import { Badge } from '@/components/ui/Badge';
@@ -33,6 +33,13 @@ import {
   dismissContraPair,
   confirmDuplicate,
   dismissDuplicate,
+  // [ADD] For the new manual Delete action below — same soft-delete
+  // mechanism confirmDuplicate() already uses (is_deleted: true, never a
+  // hard DELETE), just callable unconditionally instead of only from the
+  // possible-duplicate flow. See transactions.ts's own comment on
+  // deleteTransaction() for why this exists (double-count scenarios like
+  // a provisional notice + confirming transaction both landing visible).
+  deleteTransaction,
   type Transaction,
 } from '@/lib/api/transactions';
 
@@ -176,6 +183,11 @@ interface TransactionRowProps {
    * duplicate-resolution controls entirely (e.g. draft split-child rows,
    * which can't carry possible_duplicate_of in the first place). */
   onDuplicateResolved?: () => void;
+  /** [ADD] Called after the user confirms a manual delete, so the parent
+   * can refetch — mirrors onContraResolved/onDuplicateResolved exactly.
+   * Omit to hide the Delete action entirely (e.g. draft split-child rows,
+   * which aren't real persisted rows and have nothing to delete yet). */
+  onDeleted?: () => void;
 }
 
 /** Inline callout for rows qualifying for registered-fact resolution (see
@@ -366,7 +378,7 @@ function DuplicateResolutionRow({ txn, onResolved }: { txn: TransactionRowData; 
   );
 }
 
-export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdited, onContraResolved, onRegisterFactPress, onDuplicateResolved }: TransactionRowProps) {
+export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdited, onContraResolved, onRegisterFactPress, onDuplicateResolved, onDeleted }: TransactionRowProps) {
   const category = getCategory(txn.category);
   const needsTransferConfirmation = !!txn.possible_contra_of && !txn.is_contra;
 
@@ -417,6 +429,36 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
   // Collapsed by default elsewhere so already-approved rows don't get
   // cluttered with a text block nobody asked to see. Toggleable either way.
   const [showRaw, setShowRaw] = useState(txn.status === 'pending_review' || txn.status === 'haiku_suggested');
+
+  // [ADD] Manual delete — confirm first (this is destructive-looking to
+  // the user even though it's a soft delete under the hood), then call
+  // deleteTransaction() and let the parent refetch via onDeleted(), same
+  // pattern as every other resolution action in this file.
+  const [deleting, setDeleting] = useState(false);
+  function handleDeletePress() {
+    Alert.alert(
+      'Delete this transaction?',
+      'This removes it from your transactions and totals. Useful if it\u2019s a double-count (e.g. a payment notice and its confirmation both showing up) \u2014 not for transactions that genuinely happened.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await deleteTransaction(txn.id);
+              onDeleted?.();
+            } catch (e: any) {
+              Alert.alert('Couldn\u2019t delete', e?.message ?? 'Please try again.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  }
 
   // [FIX] Added the 'declined' branch — previously `type` could only be
   // 'debit'/'credit', so a declined transaction (amount: null) fell through
@@ -514,6 +556,19 @@ export function TransactionRow({ transaction: txn, onPress, onSplitPress, isEdit
           {onSplitPress && (
             <Pressable onPress={() => onSplitPress(txn)} hitSlop={8} style={styles.splitLink}>
               <Text style={styles.splitLinkText}>Split</Text>
+            </Pressable>
+          )}
+
+          {/* [ADD] Manual delete — same optional-prop-gated convention as
+              Split/duplicate/contra above. Omitted entirely for draft
+              split-child rows (onDeleted not passed), same as those. */}
+          {onDeleted && (
+            <Pressable onPress={handleDeletePress} disabled={deleting} hitSlop={8} style={styles.splitLink}>
+              {deleting ? (
+                <ActivityIndicator size="small" color={colors.red} />
+              ) : (
+                <Text style={[styles.splitLinkText, { color: colors.red }]}>Delete</Text>
+              )}
             </Pressable>
           )}
         </View>

@@ -1952,6 +1952,54 @@ export async function confirmDuplicate(txnId: string): Promise<void> {
 }
 
 /**
+ * [ADD] The general-purpose "delete any transaction" control this file's
+ * own comment above flagged as not yet built — same exact mechanism
+ * confirmDuplicate() already uses (is_deleted: true, never a hard DELETE,
+ * for the same reason: health-score/goals calculations and every existing
+ * matching function — sweepOpenProvisionalNotices(), reconcileProvisionalCredit(),
+ * findExistingConfirmingCredit(), all already filter is_deleted=false — must
+ * still be able to trust the row is genuinely gone from every calculation
+ * without the audit trail disappearing).
+ *
+ * Intended callers: a manual "Delete" action from History or the
+ * transaction-detail view, for cases like a scenario-1 double-count (both
+ * the provisional AutoPay notice and its real confirming debit visible at
+ * once because the auto-match didn't fire) — letting the user manually
+ * soft-delete the one that shouldn't count, same end state the automatic
+ * sweep would have produced if it had matched.
+ *
+ * Deliberately NOT scoped to any particular transaction state (unlike
+ * confirmDuplicate(), which is only ever called from the possible-duplicate
+ * review flow) — this is a plain, unconditional soft-delete for any row the
+ * user owns. Ownership isn't re-checked here beyond the id match; that's
+ * enforced the same way every other write in this file relies on it — RLS
+ * on the transactions table via the authenticated Supabase client, not an
+ * app-side check.
+ */
+export async function deleteTransaction(txnId: string): Promise<void> {
+  await supabase.from('transactions')
+    .update({ is_deleted: true })
+    .eq('id', txnId);
+}
+
+/**
+ * [ADD] Undo for the above — same "user can always change their mind, and
+ * nothing here is a hard DELETE" principle already established throughout
+ * this file (dismissDuplicate() is the same idea for the duplicate-review
+ * flow specifically). Restoring only clears is_deleted; it deliberately
+ * does NOT try to re-run reconciliation/contra/duplicate detection against
+ * the row's restored state — those all evaluate fresh on the NEXT sync or
+ * sweep pass regardless (they all re-query is_deleted=false rows each run,
+ * nothing about them is a one-time decision that restoring would need to
+ * retroactively undo).
+ */
+export async function restoreTransaction(txnId: string): Promise<void> {
+  await supabase.from('transactions')
+    .update({ is_deleted: false })
+    .eq('id', txnId);
+}
+
+/**
  * User said these are two separate, real transactions — clears the flag
  * and approves the row, since a human has now explicitly looked at it.
  */

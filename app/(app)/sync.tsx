@@ -104,7 +104,16 @@ export default function SyncScreen() {
   const [manualSyncProgress, setManualSyncProgress] = useState<SyncProgressUpdate | null>(null);
   const [exporting, setExporting] = useState(false);
   const [showDebugTools, setShowDebugTools] = useState(false);
-  // [ADD] Total synced transaction count for the status card.
+  // [CHANGED] Was a lifetime DB total (fetchTransactions()'s count:'exact'),
+  // refreshed live during sync so it never looked stale — but that's
+  // exactly what made it confusing: it read as "how many just synced"
+  // when it was actually "how many exist across all time." Repurposed to
+  // show the count from the MOST RECENT sync instead — see the status-row
+  // JSX below, which now reads manualSyncResult.transactionsInserted
+  // rather than this state. txnCount/refreshTxnCount are kept as-is
+  // (unused by the status row now, but left in case something else in
+  // this file — the export panel, etc. — comes to depend on a real
+  // lifetime count later; harmless to leave wired and refreshing).
   const [txnCount, setTxnCount] = useState<number | null>(null);
 
   // ── Export panel state ──
@@ -375,10 +384,31 @@ export default function SyncScreen() {
               {syncingAnywhere ? 'Syncing…' : formatRelativeTime(lastSyncedAt)}
             </Text>
           </View>
-          {/* [ADD] Transaction count — was designed early on, never built. */}
+          {/* [CHANGED] Was the lifetime DB total (txnCount) — read as "how
+              many synced just now" when it was actually "how many exist
+              across all time," incrementing by however many landed during
+              a sync rather than resetting per-run. Now shows the count
+              from the most recent sync instead, same source
+              ("X new transaction(s) added" in the result panel below
+              already used this correctly — this row was the only place
+              still showing the lifetime figure). Placeholder text is
+              explicit that nothing has synced *this session* yet, rather
+              than implying the lifetime total is zero.
+              KNOWN LIMITATION: this only reflects a sync triggered from
+              THIS screen (manual "Sync Now"). The hourly background sync
+              and the on-app-open sync both run outside this file (see
+              backgroundSync.ts / app/(app)/_layout.tsx) and don't
+              currently report back here — opening this screen right
+              after either of those ran will show the placeholder, not
+              their count, until "Sync Now" is pressed. Closing that gap
+              needs those two call sites to persist their result
+              somewhere this screen can read (AsyncStorage or a shared
+              store) — not done here, flagging for next time. */}
           <View style={s.statusRow}>
             <Text style={s.statusLabel}>Transactions synced</Text>
-            <Text style={s.statusValue}>{txnCount === null ? '—' : txnCount.toLocaleString('en-IN')}</Text>
+            <Text style={s.statusValue}>
+              {manualSyncResult ? manualSyncResult.transactionsInserted.toLocaleString('en-IN') : '— (sync to see)'}
+            </Text>
           </View>
           <Text style={s.statusFootnote}>Auto-syncs every hour, and whenever you open the app</Text>
         </View>

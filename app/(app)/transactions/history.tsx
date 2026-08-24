@@ -20,12 +20,21 @@
  *     removed.
  *   - No draft workspace, no Edit/Split, no Submit — reviewed rows are a
  *     historical record, not something this screen mutates. TransactionRow
- *     is used with onPress/onSplitPress both omitted (both optional props)
- *     to render it fully non-interactive. [NOTE — carried decision from
- *     this session] Edit/Split for History was scoped and then explicitly
- *     put on hold: it depends on whether monthly report-card scores are
- *     computed live or cached/snapshotted, which isn't decided until
- *     scores.ts actually exists. Revisit once that's built.
+ *     is used with onPress/onSplitPress both omitted (both optional props).
+ *     [NOTE — carried decision from this session] Edit/Split for History
+ *     was scoped and then explicitly put on hold: it depends on whether
+ *     monthly report-card scores are computed live or cached/snapshotted,
+ *     which isn't decided until scores.ts actually exists. Revisit once
+ *     that's built.
+ *   - [ADD — this pass] onDeleted IS wired, unlike Edit/Split above — a
+ *     manual delete doesn't touch report-card scoring the way an edit
+ *     would (it's the same is_deleted flip every reconciliation/duplicate
+ *     path already produces automatically elsewhere), so it doesn't share
+ *     the reason Edit/Split are on hold. Real motivating case: a
+ *     provisional payment notice and its real confirming transaction both
+ *     staying visible when the automatic match doesn't fire (see the FX
+ *     cross-currency matching gap — separate, not yet fixed) — this is
+ *     the manual fallback for that until the automatic side is fixed.
  *   - Page-based Prev/Next, matching the Active feed's pattern (confirmed
  *     with user for Active; carried over here for one consistent
  *     pagination model rather than introducing a second one — flag if you
@@ -105,7 +114,10 @@ export default function TransactionHistoryScreen() {
           )
         }
         renderItem={({ item }) => (
-          <TransactionRow transaction={mapTransactionToRow(item)} />
+          // [ADD] onDeleted wired to the same refresh() the pull-to-refresh
+          // control already uses — a delete here just needs the list
+          // re-fetched, same as any other change to the underlying data.
+          <TransactionRow transaction={mapTransactionToRow(item)} onDeleted={refresh} />
         )}
       />
 

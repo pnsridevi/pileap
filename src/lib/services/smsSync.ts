@@ -195,6 +195,19 @@ const WATERMARK_KEY_PREFIX = 'pileap:lastSyncedAt:';
 // them (the original design, and this file's own earlier pass) breaks
 // the UI whenever a completed sync finds zero new messages.
 const LAST_SYNC_DISPLAY_KEY_PREFIX = 'pileap:lastSyncDisplayAt:';
+// [ADD] Separate from LAST_SYNC_DISPLAY_KEY_PREFIX (a timestamp) — this
+// holds the actual outcome (counts) of the most recent successfully
+// completed sync, regardless of which caller triggered it. Written at the
+// same point as setLastSyncDisplayTime(), inside syncRecentSmsMessages()
+// itself, so every caller (manual "Sync Now", the hourly background task,
+// the on-app-open effect) gets this for free without each needing its own
+// plumbing. Exists because the Sync screen's status card previously only
+// ever showed a result from a sync IT triggered (manualSyncResult) — a
+// transaction synced by the background/on-open path showed nothing until
+// the user manually pressed Sync Now, at which point it correctly (but
+// confusingly) showed 0 new, since there was nothing left for that manual
+// run to find. See getLastSyncResult() below for the read side.
+const LAST_SYNC_RESULT_KEY_PREFIX = 'pileap:lastSyncResult:';
 const LOCK_KEY_PREFIX = 'pileap:syncLock:';
 // Generous on purpose — a full 90-day/500+-message first sync (foreground,
 // no OS time limit) should never realistically take this long, but the
@@ -247,6 +260,50 @@ export async function getLastSyncedAt(): Promise<Date | null> {
 
 async function setLastSyncDisplayTime(userId: string, when: Date): Promise<void> {
   await AsyncStorage.setItem(LAST_SYNC_DISPLAY_KEY_PREFIX + userId, when.toISOString());
+}
+
+/** [ADD] Read side of LAST_SYNC_RESULT_KEY_PREFIX — see its own comment
+ * above for the full "why". Returns null if no sync has ever completed on
+ * this device for this user (fresh install, or storage cleared), same
+ * "degrade to empty/null, never throw" convention as getSyncedSmsIds()
+ * elsewhere in this file. Callers should treat null as "no sync yet,"
+ * not as an error. */
+export async function getLastSyncResult(): Promise<{ transactionsInserted: number; balancesUpdated: number; at: Date } | null> {
+  const userId = await getCurrentUserIdOrNull();
+  if (!userId) return null;
+  try {
+    const raw = await AsyncStorage.getItem(LAST_SYNC_RESULT_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.transactionsInserted !== 'number' || typeof parsed?.at !== 'string') return null;
+    return {
+      transactionsInserted: parsed.transactionsInserted,
+      balancesUpdated: typeof parsed.balancesUpdated === 'number' ? parsed.balancesUpdated : 0,
+      at: new Date(parsed.at),
+    };
+  } catch (e) {
+    console.warn('getLastSyncResult: failed to read, treating as none:', e);
+    return null;
+  }
+}
+
+async function setLastSyncResult(userId: string, result: SmsSyncResult): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      LAST_SYNC_RESULT_KEY_PREFIX + userId,
+      JSON.stringify({
+        transactionsInserted: result.transactionsInserted,
+        balancesUpdated: result.balancesUpdated,
+        at: new Date().toISOString(),
+      }),
+    );
+  } catch (e) {
+    // Best-effort, same reasoning as markSmsIdsSynced() in
+    // syncedSmsCache.ts — a failed write here only means the status
+    // card falls back to its "no sync yet" placeholder next read, never
+    // affects whether the real sync succeeded.
+    console.warn('setLastSyncResult: failed to persist, status card will fall back:', e);
+  }
 }
 
 /** [ADD] Internal only — not read by the UI. Sizes the next sync's scan
@@ -495,6 +552,11 @@ export async function syncRecentSmsMessages(
     // question ("did a sync just run") that has nothing to do with
     // whether any message happened to be new.
     await setLastSyncDisplayTime(userId, new Date());
+    // [ADD] See LAST_SYNC_RESULT_KEY_PREFIX's comment above — persisted
+    // here, not in each caller, so the manual button, the background
+    // task, and the on-app-open effect all feed the same status card
+    // without each needing its own write.
+    await setLastSyncResult(userId, result);
     return result;
   } finally {
     await releaseLock(userId);

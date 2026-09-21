@@ -39,7 +39,7 @@ import { fetchActiveRegisteredFacts } from '@/lib/api/registeredFacts';
 import { fetchCustomCategories } from '@/lib/api/customCategories';
 import { syncParseLogs, ParseLogSyncResult } from '@/lib/api/parseLogs';
 import {
-  syncRecentSmsMessages, getLastSyncedAt, subscribeSyncStatus,
+  syncRecentSmsMessages, getLastSyncedAt, getLastSyncResult, subscribeSyncStatus,
   type SmsSyncResult, type SyncProgressUpdate,
 } from '@/lib/services/smsSync';
 import {
@@ -115,6 +115,30 @@ export default function SyncScreen() {
   // this file — the export panel, etc. — comes to depend on a real
   // lifetime count later; harmless to leave wired and refreshing).
   const [txnCount, setTxnCount] = useState<number | null>(null);
+  // [ADD] Loaded from AsyncStorage (see smsSync.ts's getLastSyncResult) —
+  // the outcome of the most recent sync REGARDLESS of what triggered it
+  // (manual, background task, or on-app-open). Closes the gap the
+  // previous pass flagged as a known limitation: manualSyncResult only
+  // ever reflects a sync started from this screen's own button, so a
+  // transaction synced automatically on app-open showed nothing here
+  // until the user pressed "Sync Now" themselves — at which point it
+  // correctly, but confusingly, showed 0 new. See the status-row JSX
+  // below for how this and manualSyncResult are combined.
+  const [persistedSyncResult, setPersistedSyncResult] = useState<
+    { transactionsInserted: number; balancesUpdated: number; at: Date } | null
+  >(null);
+
+  const refreshLastSynced = useCallback(async () => {
+    setLastSyncedAt(await getLastSyncedAt());
+  }, []);
+
+  // [ADD] Refreshes persistedSyncResult from storage — see its own state
+  // comment above. Called on mount (same as refreshLastSynced) so opening
+  // this screen after an auto-sync ran elsewhere shows that sync's real
+  // count immediately, not a placeholder.
+  const refreshPersistedSyncResult = useCallback(async () => {
+    setPersistedSyncResult(await getLastSyncResult());
+  }, []);
 
   // ── Export panel state ──
   // exportCache holds the one full fetch shared between populating the
@@ -124,10 +148,6 @@ export default function SyncScreen() {
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
   const [exportCache, setExportCache] = useState<Transaction[] | null>(null);
   const [loadingMonths, setLoadingMonths] = useState(false);
-
-  const refreshLastSynced = useCallback(async () => {
-    setLastSyncedAt(await getLastSyncedAt());
-  }, []);
 
   // [ADD] Refreshes the status card's transaction count. Cheap — reuses
   // fetchTransactions()'s own count:'exact' query with pageSize:1, same
@@ -151,6 +171,7 @@ export default function SyncScreen() {
   useEffect(() => {
     refreshLastSynced();
     refreshTxnCount();
+    refreshPersistedSyncResult();
 
     if (Platform.OS === 'android') {
       PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS).then((granted) => {
@@ -386,29 +407,32 @@ export default function SyncScreen() {
           </View>
           {/* [CHANGED] Was the lifetime DB total (txnCount) — read as "how
               many synced just now" when it was actually "how many exist
-              across all time," incrementing by however many landed during
-              a sync rather than resetting per-run. Now shows the count
-              from the most recent sync instead, same source
-              ("X new transaction(s) added" in the result panel below
-              already used this correctly — this row was the only place
-              still showing the lifetime figure). Placeholder text is
-              explicit that nothing has synced *this session* yet, rather
-              than implying the lifetime total is zero.
-              KNOWN LIMITATION: this only reflects a sync triggered from
-              THIS screen (manual "Sync Now"). The hourly background sync
-              and the on-app-open sync both run outside this file (see
-              backgroundSync.ts / app/(app)/_layout.tsx) and don't
-              currently report back here — opening this screen right
-              after either of those ran will show the placeholder, not
-              their count, until "Sync Now" is pressed. Closing that gap
-              needs those two call sites to persist their result
-              somewhere this screen can read (AsyncStorage or a shared
-              store) — not done here, flagging for next time. */}
+              across all time." First pass fixed that by switching to
+              manualSyncResult, but that only ever reflects a sync
+              triggered from THIS screen — a transaction synced by the
+              hourly background task or the on-app-open sync (both run
+              outside this file) showed nothing here until "Sync Now" was
+              pressed, at which point it correctly-but-confusingly showed
+              0 new (nothing was left for that manual run to find).
+              [FIX — this pass] Now prefers manualSyncResult when this
+              screen has actually run a sync itself this session (the
+              freshest possible answer), and falls back to
+              persistedSyncResult — read from storage, written by
+              syncRecentSmsMessages() itself regardless of which caller
+              invoked it — for the case where a sync happened elsewhere
+              (background task, on-app-open) before this screen was ever
+              opened. Placeholder only shows if genuinely neither has ever
+              run on this device for this user. */}
           <View style={s.statusRow}>
             <Text style={s.statusLabel}>Transactions synced</Text>
             <Text style={s.statusValue}>
-              {manualSyncResult ? manualSyncResult.transactionsInserted.toLocaleString('en-IN') : '— (sync to see)'}
+              {manualSyncResult
+                ? manualSyncResult.transactionsInserted.toLocaleString('en-IN')
+                : persistedSyncResult
+                ? persistedSyncResult.transactionsInserted.toLocaleString('en-IN')
+                : '— (sync to see)'}
             </Text>
+
           </View>
           <Text style={s.statusFootnote}>Auto-syncs every hour, and whenever you open the app</Text>
         </View>

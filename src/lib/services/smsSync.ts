@@ -101,6 +101,7 @@ import { fetchActiveRegisteredFacts } from '@/lib/api/registeredFacts';
 import { fetchCustomCategories } from '@/lib/api/customCategories';
 import { syncParseLogs } from '@/lib/api/parseLogs';
 import { supabase } from '@/lib/supabase';
+import { prepareRemoteRuleset, flushShadowReport } from '@/lib/rulesetStore';
 
 // [ADD — this pass] Staged progress reporting, replacing the flat
 // (processed, total) callback from the previous pass. A bare chunk
@@ -420,6 +421,12 @@ export async function syncSmsMessages(
 
   const matchContext = await buildMatchContext();
 
+  // [ADD — remote ruleset] Load/refresh the remote Layer 2 ruleset before
+  // parsing. No-op when EXPO_PUBLIC_REMOTE_RULESET_MODE is unset/'off'.
+  // Never throws and never blocks parsing: on any failure it keeps the
+  // last cached ruleset, or falls back to the bundled one.
+  await prepareRemoteRuleset();
+
   const results: (ParsedTransaction | BalanceUpdate)[] = parseSmsMessages(msgs, matchContext, logs);
   const ingestResult = await ingestParsedMessages(results, (processed, total) => {
     onProgress?.({ stage: 'saving', messagesScanned: msgs.length, processed, total });
@@ -433,6 +440,9 @@ export async function syncSmsMessages(
   } catch (e) {
     console.warn('smsSync: syncParseLogs failed:', e instanceof Error ? e.message : e);
   }
+  // [ADD — remote ruleset] Shadow-mode parity summary. No-op unless
+  // EXPO_PUBLIC_REMOTE_RULESET_MODE is 'shadow'; never throws.
+  await flushShadowReport();
 
   // [ADD] Newest arrival time among messages that were actually,
   // successfully synced this run — used by syncRecentSmsMessages() as a

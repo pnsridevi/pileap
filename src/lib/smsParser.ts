@@ -233,15 +233,18 @@
  *           - Fitness & Gym
  */
 
-// Layer 2 — require() because it is a CommonJS .js file
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// Layer 2
 // [CONFIRMED, not a bug] './layer2_ruleset.js' and 'ruleset.js' are two
 // copies of the same rules, kept in sync manually — 'layer2_ruleset.js' is
 // the on-device/JS-only testing copy used until the Kotlin native module
 // (SmsReaderModule.kt) ships; 'ruleset.js' is the production target. Any
 // fix landing in one (e.g. the merchant '/' stop-token fix) must be
 // mirrored into the other until they're unified.
-const { matchMessage } = require('./layer2_ruleset.js');
+// [CHANGE — remote ruleset] Routed through layer2Engine so the remote
+// ruleset (parse_rules) can be switched in via EXPO_PUBLIC_REMOTE_RULESET_MODE.
+// With the flag unset or 'off' this is exactly layer2_ruleset.js's
+// matchMessage(), unchanged. See layer2Engine.ts.
+import { matchMessage } from './layer2Engine';
 
 // [ADD] Confidence gate — standalone module, not yet wired to affect any
 // real decision. See confidenceGate.js's own header for full scope/history.

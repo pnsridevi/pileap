@@ -1,0 +1,1493 @@
+{
+  "rules": [
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_DECLINED",
+      "priority": 10,
+      "match_patterns": [
+        {
+          "re": "\\bno\\s+(?:money|amount)\\s+(?:has\\s+been\\s+)?(?:deducted|debited)\\b|\\bamount\\s+not\\s+debited\\b|\\bnot\\s+been\\s+debited\\b",
+          "flags": "i"
+        },
+        {
+          "re": "declined|txn.*fail|transaction.*fail|payment.*fail|could\\s+not\\s+be\\s+processed",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [
+        {
+          "re": "\\breversed\\b|\\breversal\\s+of\\b|\\bhas\\s+been\\s+reversed\\b",
+          "flags": "i"
+        }
+      ],
+      "fixed_fields": {
+        "direction": "declined",
+        "confidence": 0.99
+      },
+      "field_overrides": {}
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_CC_EMI_CONVERSION",
+      "priority": 20,
+      "match_patterns": [
+        {
+          "re": "credit\\s*card.*purchase\\s+of.*converted\\s+to.*month\\s+emi",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "discard_reason": "cc_emi_conversion_not_new_txn",
+        "account_number_masked": null,
+        "bank": null,
+        "balance": null
+      },
+      "field_overrides": {}
+    },
+    {
+      "layer": 2,
+      "rule_key": "BALANCE_ALERT_ONLY",
+      "priority": 30,
+      "match_patterns": [
+        {
+          "re": "\\bbalance\\s+is\\s+low\\b",
+          "flags": "i"
+        },
+        {
+          "re": "\\bbal\\s+is\\b.{0,20}\\bbelow\\b",
+          "flags": "i"
+        },
+        {
+          "re": "\\bavailable\\s+bal(?:ance)?\\b.{0,80}\\bis\\b",
+          "flags": "i"
+        },
+        {
+          "re": "\\bminimum\\s+balance\\b",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [
+        {
+          "re": "\\bdebited\\b|\\bcredited\\b|\\bdeducted\\b|\\bwithdrawn\\b|\\bwithdrawal\\b|\\bspent\\b|\\bpaid\\b|\\btransferred\\b|\\breceived\\b|\\brefunded\\b|\\bdisbursed\\b|\\bNEFT\\b|\\bIMPS\\b|\\bRTGS\\b|\\bUPI\\b|\\bEMI\\b",
+          "flags": "i"
+        }
+      ],
+      "fixed_fields": {
+        "discard_reason": "balance_disclosure_no_transaction"
+      },
+      "field_overrides": {
+        "balance": {
+          "steps": [
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_CC_SPEND_TXN",
+      "priority": 40,
+      "match_patterns": [
+        {
+          "re": "Txn\\s+Rs\\.[\\d,]+.*On\\s+\\w[\\w\\s]+Bank\\s+Card\\s+\\d{4}",
+          "flags": "is"
+        },
+        {
+          "re": "Spent\\s+Rs\\.[\\d,]+\\s+On\\s+\\w[\\w\\s]+Bank\\s+Card\\s+\\d{4}",
+          "flags": "i"
+        },
+        {
+          "re": "Paid\\s+(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\\s*[\\d,.]+.*On\\s+\\w[\\w\\s]+Bank\\s+Card\\s+\\d{4}",
+          "flags": "is"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Credit Card",
+        "balance": null,
+        "possible_contra": false,
+        "confidence": 0.88
+      },
+      "field_overrides": {
+        "amount": {
+          "steps": [
+            {
+              "re": "(?:Txn|Spent)\\s+Rs\\.([\\d,]+(?:\\.\\d{1,2})?)",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "re": "Paid\\s+(?:USD|GBP|EUR|SGD|AED|JPY|AUD|CAD)\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        },
+        "account_number_masked": {
+          "steps": [
+            {
+              "re": "Card\\s+(\\d{4})\\b",
+              "flags": "i"
+            },
+            {
+              "helper": "extractAccount"
+            }
+          ]
+        },
+        "txn_date": {
+          "steps": [
+            {
+              "helper": "extractDate"
+            },
+            {
+              "re": "\\bOn\\s+(\\d{1,2})-(\\d{2})\\b",
+              "flags": "i",
+              "as": "date_dm_envelope_year"
+            }
+          ]
+        },
+        "merchant": {
+          "steps": [
+            {
+              "re": "\\bAt\\s+(.{2,40}?)(?:\\s*\\n|\\s+by\\s+UPI|\\s+On\\s+\\d|\\s+Not\\s+You)",
+              "flags": "i"
+            }
+          ],
+          "null_if": [
+            {
+              "re": "^q\\d{9}[a-z0-9.]*@[a-z]+$",
+              "flags": "i"
+            }
+          ]
+        },
+        "ref_number": {
+          "steps": [
+            {
+              "re": "by\\s+UPI\\s+(\\d{12})\\b",
+              "flags": "i"
+            }
+          ]
+        },
+        "ref_type": {
+          "steps": [
+            {
+              "lookup": "ref_number",
+              "default": "upi_rrn"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_CC_PAYMENT",
+      "priority": 50,
+      "match_patterns": [
+        {
+          "re": "(?:for:\\s*credit card payment|paid towards.*credit card|payment towards.*credit card|paid.*for.*credit card|received\\s+towards.*credit\\s+card|payment\\s+of\\s+.*received\\s+towards.*credit\\s+card|credited\\s+to\\s+your\\s+card\\s+ending|(?:credited|received|paid).{0,40}credit\\s*card.{0,30}bill\\s*payment)",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Net Banking",
+        "merchant": null,
+        "balance": null,
+        "possible_contra": true,
+        "confidence": 0.9
+      },
+      "field_overrides": {
+        "amount": {
+          "steps": [
+            {
+              "re": "(?:[Pp]aid|[Pp]ayment\\s+of)\\s+(?:Rs\\.?|INR)\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "PLUXEE_SPEND",
+      "priority": 60,
+      "match_patterns": [
+        {
+          "re": "Rs\\.?\\s*[\\d,]+(?:\\.\\d{1,2})?\\s+spent\\s+from\\s+\\w+\\s+(?:Meal\\s+Card|Gift\\s+Card|Food\\s+Card|Wallet)",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "bank": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.88
+      },
+      "field_overrides": {
+        "amount": {
+          "steps": [
+            {
+              "re": "Rs\\.?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+spent\\s+from",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        },
+        "merchant": {
+          "steps": [
+            {
+              "helper": "extractBenefitCardMerchant"
+            }
+          ]
+        },
+        "channel": {
+          "steps": [
+            {
+              "helper": "extractBenefitCardChannel"
+            }
+          ]
+        },
+        "account_number_masked": {
+          "steps": [
+            {
+              "re": "card\\s+no\\.?\\s*[xX*]{0,4}(\\d{4})\\b",
+              "flags": "i"
+            }
+          ]
+        },
+        "requires_classification": {
+          "steps": [
+            {
+              "lookup": "merchant",
+              "null_value": true,
+              "default": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "PLUXEE_CREDIT",
+      "priority": 70,
+      "match_patterns": [
+        {
+          "re": "successfully\\s+credited\\s+with\\s+Rs\\.?\\s*[\\d,]+.*(?:Meal\\s+Wallet|Gift\\s+Wallet|Food\\s+Wallet|Wallet)",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "bank": null,
+        "channel": "Wallet",
+        "account_number_masked": null,
+        "merchant": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": true,
+        "requires_classification": false,
+        "confidence": 0.88
+      },
+      "field_overrides": {
+        "amount": {
+          "steps": [
+            {
+              "re": "credited\\s+with\\s+Rs\\.?\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "NCMC_LOAD",
+      "priority": 80,
+      "match_patterns": [
+        {
+          "re": "(?:NCMC|Prepaid\\s+Card).*is\\s+loaded\\s+with\\s+Rs\\.?\\s*[\\d,]+",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Card",
+        "merchant": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": true,
+        "requires_classification": false,
+        "confidence": 0.88
+      },
+      "field_overrides": {
+        "amount": {
+          "steps": [
+            {
+              "re": "loaded\\s+with\\s+Rs\\.?\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+              "flags": "i",
+              "as": "number"
+            },
+            {
+              "helper": "extractAmount"
+            }
+          ]
+        },
+        "account_number_masked": {
+          "steps": [
+            {
+              "re": "\\d{6}[X*]+(\\d{4})",
+              "flags": "i"
+            },
+            {
+              "helper": "extractAccount"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_WALLET_SPEND",
+      "priority": 90,
+      "match_patterns": [
+        {
+          "re": "(?:paid\\s+to\\s+.+?\\s+from\\s+your\\s+.{0,30}?(?:wallet|balance)|amazon\\s+pay.*(?:using|from).*(?:balance|wallet)|using\\s+apay\\s+balance|apay\\s+balance.*successful|paytm.*wallet.*(?:debited|used)|phonepe.*wallet.*(?:debited|used)|wallet\\s+balance.*(?:debited|used|spent))",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "bank": null,
+        "channel": "Wallet",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "paid\\s+to\\s+(.{2,40}?)\\s+from\\s+your\\b",
+              "flags": "i"
+            },
+            {
+              "re": "\\bat\\s+(.{2,40}?)(?:\\s*\\n|\\s+[Oo]n\\s+\\d|\\s+[Nn]ot\\s+[Yy]ou|$)",
+              "flags": "i"
+            },
+            {
+              "helper": "extractMerchant"
+            }
+          ],
+          "rewrite": [
+            {
+              "re": "^a\\.in\\.?$",
+              "flags": "i",
+              "value": "Amazon.in"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_NETBANKING_PAYMENT",
+      "priority": 100,
+      "match_patterns": [
+        {
+          "re": "(?:payment\\s+successful!|payment\\s+of\\s+Rs\\..*(?:is|was)\\s+successful|Rs\\..*from\\s+A\\/c.*via.*(?:net\\s*banking|online\\s+banking))",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Net Banking",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "\\bto\\s+(.{3,50}?)\\s+via\\s+",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_NACH",
+      "priority": 110,
+      "match_patterns": [
+        {
+          "re": "\\bNACH\\b|\\bUMRN\\b|\\bmandate\\b|\\bstanding instruction\\b|\\bECS\\b|\\bauto.?pay\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [
+        {
+          "re": "^UPI Mandate:",
+          "flags": "im"
+        }
+      ],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "NACH",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {}
+    },
+    {
+      "layer": 2,
+      "rule_key": "MUTUAL_FUND_SIP_BILL",
+      "priority": 120,
+      "match_patterns": [
+        {
+          "re": "\\b(?:Bill payment|Processed payment)\\s+of\\s+(?:INR|Rs\\.?)\\s*[\\d,]+(?:\\.\\d{1,2})?\\s+for\\s+.+",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "NACH",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "\\b(?:Bill payment|Processed payment)\\s+of\\s+(?:INR|Rs\\.?)\\s*[\\d,]+(?:\\.\\d{1,2})?\\s+for\\s+(.+?)(?:\\s+is\\s+scheduled\\s+for|\\s+with\\s+ref\\s+no\\.|\\.|$)",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_PPF_SSY",
+      "priority": 130,
+      "match_patterns": [
+        {
+          "re": "transferred to your PPF|transferred to your SSY|PPF\\/SSY A\\/c|Sukanya.*transfer|Public Provident.*transfer",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "NEFT",
+        "merchant": "PPF-SSY Account",
+        "possible_contra": true,
+        "confidence": 0.92
+      },
+      "field_overrides": {}
+    },
+    {
+      "layer": 2,
+      "rule_key": "LOAN_DISBURSEMENT",
+      "priority": 140,
+      "match_patterns": [
+        {
+          "re": "\\bloan\\s+amount\\b.*\\bdisbursed\\b|\\bloan\\s+amount\\b.*\\bcredited\\b|\\bloan\\s+disburs(?:ed|al)\\b|\\bloan\\s+of\\s+Rs\\.?.*\\bdisbursed\\b|\\b\\w+\\s+loan\\b(?:(?!\\.).){0,60}\\bdisbursed\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "merchant": "Loan Disbursement",
+        "possible_contra": false,
+        "confidence": 0.9
+      },
+      "field_overrides": {}
+    },
+    {
+      "layer": 2,
+      "rule_key": "CHEQUE_CLEARED_DEBIT",
+      "priority": 150,
+      "match_patterns": [
+        {
+          "re": "cheque\\s+no[.\\s]+\\d+.*\\bcleared\\b.*\\bfrom\\s+A\\/c",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Cheque",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "cheque\\s+no[.\\s]+(\\d+)",
+              "flags": "i",
+              "template": "Cheque #{1}"
+            }
+          ]
+        },
+        "ref_number": {
+          "steps": [
+            {
+              "re": "cheque\\s+no[.\\s]+(\\d+)",
+              "flags": "i"
+            }
+          ]
+        },
+        "ref_type": {
+          "steps": [
+            {
+              "lookup": "ref_number",
+              "default": "cheque_number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "CARD_POS_USED_FOR",
+      "priority": 160,
+      "match_patterns": [
+        {
+          "re": "\\bcard\\b.{0,20}\\bused\\s+for\\b|\\busing\\b.{0,45}\\bcard\\b.{0,20}\\bfor\\s+Rs",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Card",
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "\\bat\\s+(.{2,40}?)(?:\\s+on\\s+\\d|\\s*\\.|\\s*$)",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_CHARGED",
+      "priority": 170,
+      "match_patterns": [
+        {
+          "re": "\\bcharged\\s+(?:to|for)\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "possible_contra": false,
+        "confidence": 0.82
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "charged\\s+for\\s+your\\s+(.{2,40}?)(?:\\s+on\\s+\\d|\\.|$)",
+              "flags": "i"
+            },
+            {
+              "helper": "extractMerchant"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "CASH_DEPOSIT",
+      "priority": 180,
+      "match_patterns": [
+        {
+          "re": "\\bcash\\s+deposit\\s+of\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "merchant": "Cash Deposit",
+        "possible_contra": true,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "channel": {
+          "steps": [
+            {
+              "test": {
+                "re": "\\bATM\\b|\\bCDM\\b",
+                "flags": "i"
+              },
+              "value": "ATM"
+            },
+            {
+              "value": "Cash"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "WALLET_LOAD",
+      "priority": 190,
+      "match_patterns": [
+        {
+          "re": "\\badded\\s+to\\s+your\\b.*\\bfrom\\s+linked\\s+bank\\s+account\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "channel": "Wallet",
+        "possible_contra": true,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "added\\s+to\\s+your\\s+(.{2,30}?)\\s+(?:wallet|balance)",
+              "flags": "i",
+              "template": "{1} Wallet Load"
+            },
+            {
+              "re": "added\\s+to\\s+your\\s+(.{2,30}?)\\s+on\\s+\\d",
+              "flags": "i",
+              "template": "{1} Wallet Load"
+            },
+            {
+              "value": "Wallet Load"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_PAID_TO",
+      "priority": 200,
+      "match_patterns": [
+        {
+          "re": "\\bpaid\\b.{0,25}?\\b(?:to|towards|for|at)\\b|\\bhas\\s+been\\s+paid\\s+successfully\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "confidence": 0.82
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "\\bto\\s+([A-Za-z][A-Za-z .]{2,40}?)\\s+(?:using|from|on|via)\\b",
+              "flags": "i"
+            },
+            {
+              "re": "\\bpaid\\s+for\\s+(.{2,40}?)\\s+(?:renewal|membership|on\\s+\\d)",
+              "flags": "i"
+            },
+            {
+              "re": "\\bpaid\\s+at\\s+(.{2,40}?)\\s+(?:via|on\\s+\\d)",
+              "flags": "i"
+            },
+            {
+              "re": "\\bparking\\s+at\\s+(.{2,40}?)\\s+via\\b",
+              "flags": "i"
+            },
+            {
+              "re": "^Your\\s+(.{2,30}?)\\s+(?:electricity|gas|water|mobile|broadband)?\\s*bill\\b",
+              "flags": "i"
+            }
+          ]
+        },
+        "ref_number": {
+          "steps": [
+            {
+              "re": "UPI\\s+transaction\\s+ID\\s*[:\\s]*(\\d{8,})",
+              "flags": "i"
+            },
+            {
+              "helper": "refNumber"
+            }
+          ]
+        },
+        "ref_type": {
+          "steps": [
+            {
+              "test": {
+                "re": "UPI\\s+transaction\\s+ID\\s*[:\\s]*(\\d{8,})",
+                "flags": "i"
+              },
+              "value": "upi_rrn"
+            },
+            {
+              "helper": "refType"
+            }
+          ]
+        },
+        "possible_contra": {
+          "steps": [
+            {
+              "helper": "isPossibleSelfTransfer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_PURCHASE_CONFIRMATION",
+      "priority": 210,
+      "match_patterns": [
+        {
+          "re": "paid\\s+via\\s+\\w+.*for|:\\s*Rs\\.?[\\d,]+(?:\\.\\d{1,2})?\\s+paid\\s+for|payment\\s+of\\s+(?:Rs\\.?|INR)\\s*[\\d,]+(?:\\.\\d{1,2})?\\s+successful\\s+for|recharge\\s+of\\s+(?:Rs\\.?|INR)\\s*[\\d,]+(?:\\.\\d{1,2})?\\s+(?:is\\s+|was\\s+)?successful|gift\\s+card\\s+purchased\\s+successfully|recharged\\s+with\\s+(?:Rs\\.?|INR)\\s*[\\d,]+|(?:gold|purchase)\\s+(?:purchase\\s+)?of\\s+[\\d.]+\\s*g(?:rams?)?\\s+worth\\s+(?:Rs\\.?|INR)\\s*[\\d,]+.*successful",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "bank": null,
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.75
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "^([A-Za-z][A-Za-z0-9 ]{2,30}?):",
+              "flags": ""
+            },
+            {
+              "re": "paid\\s+via\\s+(\\w+)",
+              "flags": "i"
+            },
+            {
+              "re": "for\\s+your\\s+(\\w+)\\s+order",
+              "flags": "i"
+            },
+            {
+              "re": "^(\\w+)\\s+(?:DTH|Mobile)\\s+Recharge",
+              "flags": "i"
+            },
+            {
+              "re": "Rs\\.?[\\d,]+(?:\\.\\d{1,2})?\\s+([A-Za-z][A-Za-z0-9 ]{2,30}?)\\s+Gift\\s+Card",
+              "flags": "i"
+            },
+            {
+              "re": "^([A-Za-z][A-Za-z0-9 ]{2,30}?)\\s+Smart\\s+Card\\s+recharged",
+              "flags": "i"
+            },
+            {
+              "re": "\\bvia\\s+([A-Za-z][A-Za-z0-9 ]{2,30}?)\\s+on\\s+\\d",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "DEMAND_DRAFT_ISSUED",
+      "priority": 220,
+      "match_patterns": [
+        {
+          "re": "demand\\s+draft\\s+no[.\\s]+\\d+.*\\bissued\\s+against\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "DD",
+        "balance": null,
+        "possible_contra": false,
+        "confidence": 0.85
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "demand\\s+draft\\s+no[.\\s]+(\\d+)",
+              "flags": "i",
+              "template": "Demand Draft #{1}"
+            }
+          ]
+        },
+        "ref_number": {
+          "steps": [
+            {
+              "re": "demand\\s+draft\\s+no[.\\s]+(\\d+)",
+              "flags": "i"
+            }
+          ]
+        },
+        "ref_type": {
+          "steps": [
+            {
+              "lookup": "ref_number",
+              "default": "dd_number"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "LEGACY_DR_CR_FORMAT",
+      "priority": 230,
+      "match_patterns": [
+        {
+          "re": "\\bAC\\s+[Xx*]{1,4}\\d{4}\\s+(?:DR|CR)\\s+RS\\.?\\s*\\d",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "channel": "UPI",
+        "merchant": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.8
+      },
+      "field_overrides": {
+        "direction": {
+          "steps": [
+            {
+              "re": "\\bAC\\s+[Xx*]{1,4}\\d{4}\\s+(DR|CR)\\s+RS\\.?\\s*\\d",
+              "flags": "i",
+              "map": {
+                "cr": "credit",
+                "dr": "debit"
+              }
+            },
+            {
+              "value": "debit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "COURIER_COD_PAYMENT",
+      "priority": 240,
+      "match_patterns": [
+        {
+          "re": "\\bcollected\\s+as\\s+COD\\s+payment\\b",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "bank": null,
+        "channel": "Cash",
+        "account_number_masked": null,
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.7
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "^([A-Za-z][A-Za-z0-9 ]{2,20}?):",
+              "flags": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "REFUND_INITIATED",
+      "priority": 250,
+      "match_patterns": [
+        {
+          "re": "refund\\s+of\\s+(?:Rs\\.?|INR)\\s*[\\d,]+(?:\\.\\d{1,2})?.*initiated",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "channel": "Refund",
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.6
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "returned\\s+(.{2,30}?)\\s+order",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "VENDOR_SETTLEMENT_NOTICE",
+      "priority": 260,
+      "match_patterns": [
+        {
+          "re": "^(?=[\\s\\S]*\\b(?:settlement|payout)\\b)[\\s\\S]*(?:\\bis\\s+processed\\b|\\bhas\\s+been\\s+processed\\b)",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [
+        {
+          "re": "\\b(?:credited|deposited|received|refunded|reversed|debited|deducted|withdrawn|spent|sent)\\b",
+          "flags": "i"
+        }
+      ],
+      "fixed_fields": {
+        "direction": "credit",
+        "channel": "Vendor Settlement",
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.5
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "-\\s*([A-Za-z][A-Za-z .&]{2,30})\\s*$",
+              "flags": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "PROVISIONAL_CREDIT_NOTICE",
+      "priority": 270,
+      "match_patterns": [
+        {
+          "re": "will\\s+be\\s+(?:credited|refunded|processed)",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit",
+        "channel": "Provisional Credit",
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.5
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "-\\s*([A-Za-z][A-Za-z .&]{2,30})\\s*$",
+              "flags": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "PAYMENT_CONFIRMATION_NOTICE",
+      "priority": 280,
+      "match_patterns": [
+        {
+          "re": "\\bconfirm(?:ed)?\\s+receipt\\s+of\\s+(?:Rs\\.?|INR|₹)",
+          "flags": "i"
+        }
+      ],
+      "exclude_patterns": [
+        {
+          "re": "\\b(?:credited|deposited|received|refunded|reversed|debited|deducted|withdrawn|spent|sent)\\b",
+          "flags": "i"
+        }
+      ],
+      "fixed_fields": {
+        "direction": "debit",
+        "channel": "Payment Confirmation",
+        "balance": null,
+        "ref_number": null,
+        "ref_type": null,
+        "possible_contra": false,
+        "confidence": 0.5
+      },
+      "field_overrides": {
+        "merchant": {
+          "steps": [
+            {
+              "re": "-\\s*([A-Za-z][A-Za-z .&]{2,30})\\s*$",
+              "flags": ""
+            },
+            {
+              "re": "towards\\s+([A-Za-z][A-Za-z0-9 .&]{2,40}?)(?:\\s+proposal|\\s+policy|,|\\.|$)",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_DEBIT",
+      "priority": 290,
+      "match_patterns": [
+        {
+          "re": "\\bdebited\\b|\\bdeducted\\b|\\bSent\\b|\\bWithdrawn\\b|\\bWithdrawal\\b|\\bWdl\\b|\\bSpent\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "debit",
+        "confidence": 0.8
+      },
+      "field_overrides": {
+        "possible_contra": {
+          "steps": [
+            {
+              "helper": "isPossibleSelfTransfer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "layer": 2,
+      "rule_key": "GENERIC_CREDIT",
+      "priority": 300,
+      "match_patterns": [
+        {
+          "re": "\\bcredited\\b|\\bdeposited\\b|\\breceived\\b|\\brefunded\\b|\\breversed\\b",
+          "flags": "im"
+        }
+      ],
+      "exclude_patterns": [],
+      "fixed_fields": {
+        "direction": "credit"
+      },
+      "field_overrides": {
+        "_vpa": {
+          "steps": [
+            {
+              "re": "from VPA\\s+([\\w.\\-@]+)",
+              "flags": "i"
+            }
+          ]
+        },
+        "vpa_type": {
+          "steps": [
+            {
+              "helper": "classifyVpa",
+              "input_field": "_vpa"
+            }
+          ]
+        },
+        "merchant": {
+          "steps": [
+            {
+              "lookup": "_vpa"
+            },
+            {
+              "helper": "extractMerchant"
+            }
+          ],
+          "null_if": [
+            {
+              "re": "your\\s+(credit\\s+)?card\\s+ending",
+              "flags": "i"
+            },
+            {
+              "re": "YOUR\\s+CREDIT\\s+CARD\\s+ENDING\\s+WITH",
+              "flags": "i"
+            },
+            {
+              "re": "your\\s+rwallet",
+              "flags": "i"
+            },
+            {
+              "re": "Meal\\s+Wallet\\s+on\\s+",
+              "flags": "i"
+            }
+          ]
+        },
+        "requires_classification": {
+          "steps": [
+            {
+              "lookup": "vpa_type",
+              "map": {
+                "person": true,
+                "unknown": true
+              },
+              "null_value": false,
+              "default": false
+            }
+          ]
+        },
+        "possible_contra": {
+          "steps": [
+            {
+              "helper": "isPossibleSelfTransfer"
+            }
+          ]
+        },
+        "confidence": {
+          "steps": [
+            {
+              "lookup": "vpa_type",
+              "map": {
+                "merchant": 0.85,
+                "person": 0.75
+              },
+              "null_value": 0.8,
+              "default": 0.8
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "aliases": [
+    {
+      "token": "punjabnationalbank",
+      "bank_name": "Punjab National Bank",
+      "priority": 10
+    },
+    {
+      "token": "statebankofindia",
+      "bank_name": "State Bank of India",
+      "priority": 20
+    },
+    {
+      "token": "bankofmaharashtra",
+      "bank_name": "Bank of Maharashtra",
+      "priority": 30
+    },
+    {
+      "token": "bankofbaroda",
+      "bank_name": "Bank of Baroda",
+      "priority": 40
+    },
+    {
+      "token": "bankofindore",
+      "bank_name": "Bank of Indore",
+      "priority": 50
+    },
+    {
+      "token": "centralbankofindia",
+      "bank_name": "Central Bank of India",
+      "priority": 60
+    },
+    {
+      "token": "indianoverseasbank",
+      "bank_name": "Indian Overseas Bank",
+      "priority": 70
+    },
+    {
+      "token": "tamilnadmercantilebank",
+      "bank_name": "Tamilnad Mercantile Bank",
+      "priority": 80
+    },
+    {
+      "token": "karurvysyabank",
+      "bank_name": "Karur Vysya Bank",
+      "priority": 90
+    },
+    {
+      "token": "cityunionbank",
+      "bank_name": "City Union Bank",
+      "priority": 100
+    },
+    {
+      "token": "southindianbank",
+      "bank_name": "South Indian Bank",
+      "priority": 110
+    },
+    {
+      "token": "lakshmivilasbank",
+      "bank_name": "Lakshmi Vilas Bank",
+      "priority": 120
+    },
+    {
+      "token": "dhanlaxmibank",
+      "bank_name": "Dhanlaxmi Bank",
+      "priority": 130
+    },
+    {
+      "token": "airtelpaymentbank",
+      "bank_name": "Airtel Payments Bank",
+      "priority": 140
+    },
+    {
+      "token": "paytmpaymentbank",
+      "bank_name": "Paytm Payments Bank",
+      "priority": 150
+    },
+    {
+      "token": "jiopaymentbank",
+      "bank_name": "Jio Payments Bank",
+      "priority": 160
+    },
+    {
+      "token": "finopaymentbank",
+      "bank_name": "Fino Payments Bank",
+      "priority": 170
+    },
+    {
+      "token": "nsdlpaymentbank",
+      "bank_name": "NSDL Payments Bank",
+      "priority": 180
+    },
+    {
+      "token": "ausmallfinancebank",
+      "bank_name": "AU Small Finance Bank",
+      "priority": 190
+    },
+    {
+      "token": "equitasbank",
+      "bank_name": "Equitas Small Finance Bank",
+      "priority": 200
+    },
+    {
+      "token": "ujjivanbank",
+      "bank_name": "Ujjivan Small Finance Bank",
+      "priority": 210
+    },
+    {
+      "token": "esafbank",
+      "bank_name": "ESAF Small Finance Bank",
+      "priority": 220
+    },
+    {
+      "token": "suryodaybank",
+      "bank_name": "Suryoday Small Finance Bank",
+      "priority": 230
+    },
+    {
+      "token": "idfcfirstbank",
+      "bank_name": "IDFC First Bank",
+      "priority": 240
+    },
+    {
+      "token": "kotakbank",
+      "bank_name": "Kotak Mahindra Bank",
+      "priority": 250
+    },
+    {
+      "token": "kotakmahindra",
+      "bank_name": "Kotak Mahindra Bank",
+      "priority": 260
+    },
+    {
+      "token": "indusindbank",
+      "bank_name": "IndusInd Bank",
+      "priority": 270
+    },
+    {
+      "token": "federalbank",
+      "bank_name": "Federal Bank",
+      "priority": 280
+    },
+    {
+      "token": "saraswatbank",
+      "bank_name": "Saraswat Bank",
+      "priority": 290
+    },
+    {
+      "token": "karnatkabank",
+      "bank_name": "Karnataka Bank",
+      "priority": 300
+    },
+    {
+      "token": "nainitalbank",
+      "bank_name": "Nainital Bank",
+      "priority": 310
+    },
+    {
+      "token": "hdfcbank",
+      "bank_name": "HDFC Bank",
+      "priority": 320
+    },
+    {
+      "token": "icicibank",
+      "bank_name": "ICICI Bank",
+      "priority": 330
+    },
+    {
+      "token": "axisbank",
+      "bank_name": "Axis Bank",
+      "priority": 340
+    },
+    {
+      "token": "yesbank",
+      "bank_name": "Yes Bank",
+      "priority": 350
+    },
+    {
+      "token": "rblbank",
+      "bank_name": "RBL Bank",
+      "priority": 360
+    },
+    {
+      "token": "dcbbank",
+      "bank_name": "DCB Bank",
+      "priority": 370
+    },
+    {
+      "token": "canarabank",
+      "bank_name": "Canara Bank",
+      "priority": 380
+    },
+    {
+      "token": "unionbank",
+      "bank_name": "Union Bank of India",
+      "priority": 390
+    },
+    {
+      "token": "indianbank",
+      "bank_name": "Indian Bank",
+      "priority": 400
+    },
+    {
+      "token": "hdfcbk",
+      "bank_name": "HDFC Bank",
+      "priority": 410
+    },
+    {
+      "token": "icicibk",
+      "bank_name": "ICICI Bank",
+      "priority": 420
+    },
+    {
+      "token": "indusind",
+      "bank_name": "IndusInd Bank",
+      "priority": 430
+    },
+    {
+      "token": "utibbank",
+      "bank_name": "Axis Bank",
+      "priority": 440
+    },
+    {
+      "token": "aubank",
+      "bank_name": "AU Small Finance Bank",
+      "priority": 450
+    },
+    {
+      "token": "idfc",
+      "bank_name": "IDFC First Bank",
+      "priority": 460
+    },
+    {
+      "token": "sbi",
+      "bank_name": "State Bank of India",
+      "priority": 470
+    },
+    {
+      "token": "pnb",
+      "bank_name": "Punjab National Bank",
+      "priority": 480
+    },
+    {
+      "token": "bob",
+      "bank_name": "Bank of Baroda",
+      "priority": 490
+    },
+    {
+      "token": "iob",
+      "bank_name": "Indian Overseas Bank",
+      "priority": 500
+    },
+    {
+      "token": "kvb",
+      "bank_name": "Karur Vysya Bank",
+      "priority": 510
+    },
+    {
+      "token": "tmb",
+      "bank_name": "Tamilnad Mercantile Bank",
+      "priority": 520
+    },
+    {
+      "token": "cub",
+      "bank_name": "City Union Bank",
+      "priority": 530
+    },
+    {
+      "token": "sib",
+      "bank_name": "South Indian Bank",
+      "priority": 540
+    },
+    {
+      "token": "americanexpress",
+      "bank_name": "American Express",
+      "priority": 550
+    },
+    {
+      "token": "amex",
+      "bank_name": "American Express",
+      "priority": 560
+    }
+  ]
+}

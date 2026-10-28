@@ -191,10 +191,14 @@ export default function SyncScreen() {
       if (!syncing) {
         refreshLastSynced();
         refreshTxnCount();
+        // [FIX — Oct 28] Was missing — "Transactions synced" stayed at
+        // "—" after an app-open/resume/background sync finished, because
+        // only lastSyncedAt and txnCount were refreshed here.
+        refreshPersistedSyncResult();
       }
     });
     return unsubscribe;
-  }, [refreshLastSynced, refreshTxnCount]);
+  }, [refreshLastSynced, refreshTxnCount, refreshPersistedSyncResult]);
 
   async function handleRequestPermission() {
     if (Platform.OS !== 'android') return;
@@ -298,8 +302,13 @@ export default function SyncScreen() {
   // export panel was left open across that trip, refetch immediately
   // rather than leaving it showing stale year/month options until the
   // user manually closes and reopens the panel.
+  // [FIX — Oct 28] Also refresh the status card on every focus. Tabs stay
+  // mounted, so the mount-time refresh above only ever ran once per app
+  // launch — returning to this tab later showed stale values.
   useFocusEffect(
     useCallback(() => {
+      refreshLastSynced();
+      refreshPersistedSyncResult();
       setExportCache(null);
       if (exportPanelOpen) {
         loadExportCache();
@@ -434,7 +443,7 @@ export default function SyncScreen() {
             </Text>
 
           </View>
-          <Text style={s.statusFootnote}>Auto-syncs every hour, and whenever you open the app</Text>
+          <Text style={s.statusFootnote}>Syncs whenever you open the app, and periodically in the background</Text>
         </View>
 
         {/* ── Primary actions ── */}

@@ -35,15 +35,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "57afcb2d-55d9-4001-a84e-69d5c0461c61"
+        "projectId": "66797a5f-4add-47f4-943f-fe6b5dd41061"
       }
     },
-    "owner": "sridevi1234",
+    "owner": "sridevi123",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/57afcb2d-55d9-4001-a84e-69d5c0461c61",
+      "url": "https://u.expo.dev/66797a5f-4add-47f4-943f-fe6b5dd41061",
       "fallbackToCacheTimeout": 3000,
       "checkAutomatically": "ON_LOAD"
     }

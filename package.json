@@ -1,7 +1,7 @@
 {
   "name": "pileap-mobile",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "^2.43.0",
     "expo": "~54.0.0",
     "expo-background-fetch": "~14.0.9",
+    "expo-background-task": "~1.0.10",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.23",

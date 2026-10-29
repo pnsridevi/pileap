@@ -21,16 +21,30 @@
  *     warning; syncRecentSmsMessages() itself already no-ops cleanly if
  *     there's no signed-in user.
  *
+ * [ADD — Oct 28] On-resume sync. The mount effect only runs on a cold
+ * start — switching back to Pileap from recent apps did NOT sync, because
+ * this layout stays mounted. A second effect now syncs whenever the app
+ * returns to the foreground, at most once every RESUME_SYNC_MIN_GAP_MS so
+ * quick app switches don't re-read SMS each time. smsSync.ts's lock
+ * already prevents two syncs overlapping.
+ *
+ * Note: backgroundSync.ts is now also imported from apps/mobile/index.js
+ * so the task is defined on background starts. Importing it here too is
+ * harmless (a module only runs once).
+ *
  * [KEPT] The href: null pattern for hiding Report Card/Modules/Goals
  * tabs, and the ordering comments below, are unchanged from before.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { Tabs } from 'expo-router';
 import { colors } from '@/constants/theme';
 import Svg, { Path, Polyline, Line, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { syncRecentSmsMessages } from '@/lib/services/smsSync';
 import { registerBackgroundSyncAsync } from '@/lib/services/backgroundSync';
+
+const RESUME_SYNC_MIN_GAP_MS = 5 * 60 * 1000; // 5 minutes
 
 function ReportCardIcon({ color }: { color: string }) {
   return (
@@ -97,16 +111,33 @@ function SyncIcon({ color }: { color: string }) {
 
 export default function AppLayout() {
   const insets = useSafeAreaInsets();
+  // Time of the last sync this layout started (cold start or resume).
+  const lastForegroundSyncAt = useRef(0);
 
   // [ADD] On-app-open sync + background-task registration. Runs once per
-  // app mount, deliberately not tied to any tab being visible.
+  // app mount (cold start), deliberately not tied to any tab being visible.
   useEffect(() => {
+    lastForegroundSyncAt.current = Date.now();
     syncRecentSmsMessages().catch((e) => {
       console.warn('On-open SMS sync failed:', e instanceof Error ? e.message : e);
     });
     registerBackgroundSyncAsync().catch((e) => {
       console.warn('Background sync registration failed:', e instanceof Error ? e.message : e);
     });
+  }, []);
+
+  // [ADD — Oct 28] On-resume sync: runs when the app comes back to the
+  // foreground (e.g. from recent apps), throttled to once per 5 minutes.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      if (Date.now() - lastForegroundSyncAt.current < RESUME_SYNC_MIN_GAP_MS) return;
+      lastForegroundSyncAt.current = Date.now();
+      syncRecentSmsMessages().catch((e) => {
+        console.warn('On-resume SMS sync failed:', e instanceof Error ? e.message : e);
+      });
+    });
+    return () => sub.remove();
   }, []);
 
   return (

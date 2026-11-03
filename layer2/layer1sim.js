@@ -136,6 +136,9 @@ function passesLayer1Filter(body) {
 
   // 7. non-financial service noise
   if (b.includes("power cut") || b.includes("power outage") || b.includes("will be restored") ||
+      // [FIX] Tamil service-noise keywords — present in SmsReaderModule.kt
+      // but were missing here, so tests kept messages the phone drops.
+      b.includes("மின்தடங்கல்") || b.includes("ரீசார்ஜ்") || b.includes("மிஸ்டு கால்") ||
       b.includes("beware dealing on unsolicited") || b.includes("attention_investors") ||
       b.includes("locker access") || b.includes("locker branch") || b.includes("on-board food menu") ||
       b.includes("menurates.irctc") || b.includes("boarding allowed") || b.includes("trai dnd") ||

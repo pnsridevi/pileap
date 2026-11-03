@@ -3,8 +3,8 @@
 // Sits NEXT TO app.json — app.json stays the main config and is not changed.
 // Expo reads app.json first and passes it in here as `config`.
 //
-// For the "development" build profile only, this gives the app its own
-// identity so it installs SIDE BY SIDE with the normal Pileap app:
+// For the "development" and "devtest" build profiles only, this gives the
+// app its own identity so it installs SIDE BY SIDE with the normal Pileap app:
 //   name      Pileap      -> Pileap Dev
 //   app ID    com.pileap.app -> com.pileap.app.dev
 //   scheme    pileap      -> pileap-dev
@@ -12,11 +12,15 @@
 // Every other profile (preview, production) gets app.json exactly as is.
 //
 // EAS_BUILD_PROFILE is set automatically by EAS during a cloud build.
-// APP_VARIANT lets your PC (npx expo start) use the same values — add
-// APP_VARIANT=development to the feature folder's .env.
+// APP_VARIANT lets your PC (npx expo start, eas update) use the same
+// values — add APP_VARIANT=development to the feature folder's .env.
+//
+// "devtest" = the same Pileap Dev app as "development", but a normal
+// standalone app (no laptop needed), so it can run every day on real SMS.
 
 const IS_DEV =
   process.env.EAS_BUILD_PROFILE === 'development' ||
+  process.env.EAS_BUILD_PROFILE === 'devtest' ||
   process.env.APP_VARIANT === 'development';
 
 const DEV_COLOR = '#DC2626'; // red

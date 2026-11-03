@@ -17,6 +17,21 @@
         "EXPO_PUBLIC_REMOTE_RULESET_MODE": "shadow"
       }
     },
+    "devtest": {
+      "distribution": "internal",
+      "channel": "devtest",
+      "developmentClient": false,
+      "android": { "buildType": "apk" },
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "APP_VARIANT": "development",
+        "EXPO_PUBLIC_TEST_AUTH_MODE": "true",
+        "EXPO_PUBLIC_TEST_AUTH_SHARED_SECRET": "x7Qp2mZ9vLk4RtY8wN3jFhB6cD1sA0eU",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://hpvztbvrwhwdybkmaczs.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhwdnp0YnZyd2h3ZHlia21hY3pzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODEzNDAsImV4cCI6MjEwNTU1NzM0MH0.f0ZvmrvdsgJZnSMQT4BLKGGGEgMpeEDf43vJtvU3HRE",
+        "EXPO_PUBLIC_REMOTE_RULESET_MODE": "shadow"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "channel": "preview",

@@ -32,6 +32,10 @@ declare class SmsReaderModule extends NativeModule<{}> {
   // See flushListenerEvents() in src/lib/api/backgroundSyncLog.ts.
   peekListenerEvents(): Promise<string>;
   clearListenerEvents(count: number): Promise<void>;
+
+  // [ADD — build 2] Records a step in the same on-phone log, no network.
+  // detailsJson must be a JSON object string.
+  recordListenerEvent(event: string, detailsJson: string): Promise<void>;
 }
 
 export default requireNativeModule<SmsReaderModule>('SmsReader');

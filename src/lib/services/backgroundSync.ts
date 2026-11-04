@@ -67,7 +67,16 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   try {
     // false: never do the heavy first-ever 90-day sync in the background;
     // leave it for the next app open (see smsSync.ts).
-    const result = await syncRecentSmsMessages(false);
+    // [ADD — build 2] Same step trace as the listener task: on 4 Nov these
+    // runs froze after task_invoked, and we couldn't see where.
+    let lastStage = '';
+    const result = await syncRecentSmsMessages(false, (update) => {
+      if (update.stage !== lastStage) {
+        lastStage = update.stage;
+        void SmsReader.recordListenerEvent('hourly_js_step', JSON.stringify({ step: `stage_${update.stage}` }))
+          .catch(() => undefined);
+      }
+    });
 
     if (result.skippedDeferredFirstSync || result.skippedConcurrentSync) {
       // [TESTING]
@@ -103,36 +112,58 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
  * closed, in the live app if it's open). Same sync as the hourly task and
  * Sync Now — syncRecentSmsMessages() keeps its own lock, so it's safe if
  * another sync is already running.
+ *
+ * [CHANGE — build 2] Every step is first recorded in the on-phone log
+ * (listener_js_step, no network), so if the run freezes we can see exactly
+ * where. Network logging and the upload of the on-phone log happen at the
+ * end instead of the start.
  */
-TaskManager.defineTask(SMS_LISTENER_TASK, async () => {
-  // [TESTING]
-  await logBackgroundSyncEvent('listener_sync_invoked');
-  await flushListenerEvents();
+function traceListener(step: string, extra?: Record<string, unknown>): Promise<void> {
+  return SmsReader.recordListenerEvent('listener_js_step', JSON.stringify({ step, ...(extra ?? {}) }))
+    .catch(() => undefined);
+}
 
+TaskManager.defineTask(SMS_LISTENER_TASK, async () => {
+  await traceListener('task_started');
+
+  let lastStage = '';
   try {
-    const result = await syncRecentSmsMessages(false);
+    const result = await syncRecentSmsMessages(false, (update) => {
+      if (update.stage !== lastStage) {
+        lastStage = update.stage;
+        void traceListener(`stage_${update.stage}`, { messagesScanned: update.messagesScanned ?? null });
+      }
+    });
+
+    await traceListener('sync_returned', {
+      transactionsInserted: result.transactionsInserted,
+      skippedConcurrentSync: !!result.skippedConcurrentSync,
+      skippedDeferredFirstSync: !!result.skippedDeferredFirstSync,
+    });
 
     if (result.skippedDeferredFirstSync || result.skippedConcurrentSync) {
       // [TESTING]
       await logBackgroundSyncEvent('listener_sync_no_data', {
         reason: result.skippedDeferredFirstSync ? 'deferred_first_sync' : 'concurrent_sync',
       });
-      return;
+    } else {
+      const hadNewData = result.transactionsInserted > 0 || result.balancesUpdated > 0;
+      // [TESTING]
+      await logBackgroundSyncEvent(hadNewData ? 'listener_sync_succeeded' : 'listener_sync_no_data', {
+        transactionsInserted: result.transactionsInserted,
+        balancesUpdated: result.balancesUpdated,
+      });
     }
-
-    const hadNewData = result.transactionsInserted > 0 || result.balancesUpdated > 0;
-    // [TESTING]
-    await logBackgroundSyncEvent(hadNewData ? 'listener_sync_succeeded' : 'listener_sync_no_data', {
-      transactionsInserted: result.transactionsInserted,
-      balancesUpdated: result.balancesUpdated,
-    });
   } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    await traceListener('sync_threw', { error });
     // [TESTING]
-    await logBackgroundSyncEvent('listener_sync_failed', {
-      error: e instanceof Error ? e.message : String(e),
-    });
-    console.warn('SMS listener sync failed:', e instanceof Error ? e.message : e);
+    await logBackgroundSyncEvent('listener_sync_failed', { error });
+    console.warn('SMS listener sync failed:', error);
   }
+
+  await traceListener('task_done');
+  await flushListenerEvents();
 });
 
 /**

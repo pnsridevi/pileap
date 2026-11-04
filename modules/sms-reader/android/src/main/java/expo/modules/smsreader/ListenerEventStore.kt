@@ -1,6 +1,7 @@
 package expo.modules.smsreader
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -34,14 +35,37 @@ internal object ListenerEventStore {
   fun lastBankSmsAt(context: Context): Long =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_LAST_BANK_SMS, 0L)
 
+  // [ADD — build 2] When the current listener job was enqueued; 0 = no job
+  // pending (the worker clears it when it finishes normally). Lets the
+  // receiver replace a job that got stuck instead of being blocked by it.
+  private const val KEY_LAST_ENQUEUED = "last_job_enqueued_at"
+  const val LOG_TAG = "PileapListener"
+
   @Synchronized
+  fun setLastEnqueuedAt(context: Context, at: Long) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putLong(KEY_LAST_ENQUEUED, at).commit()
+  }
+
+  @Synchronized
+  fun lastEnqueuedAt(context: Context): Long =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_LAST_ENQUEUED, 0L)
+
+  /** Records the event and also writes it to logcat (tag PileapListener). */
   fun add(context: Context, event: String, details: Map<String, Any?>) {
+    val d = JSONObject()
+    try {
+      details.forEach { (k, v) -> d.put(k, v ?: JSONObject.NULL) }
+    } catch (e: Exception) { }
+    addJson(context, event, d)
+  }
+
+  @Synchronized
+  fun addJson(context: Context, event: String, d: JSONObject) {
+    try { Log.i(LOG_TAG, "$event $d") } catch (e: Exception) { }
     try {
       val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       val list = JSONArray(prefs.getString(KEY, "[]"))
-
-      val d = JSONObject()
-      details.forEach { (k, v) -> d.put(k, v ?: JSONObject.NULL) }
 
       val item = JSONObject()
       item.put("event", event)

@@ -387,6 +387,17 @@ class SmsReaderModule : Module() {
       promise.resolve(ListenerEventStore.peek(context))
     }
 
+    // [ADD — build 2] Lets the JS listener task record its own steps in the
+    // same on-phone log (no network needed, so it still works if the app is
+    // about to be frozen). detailsJson is a JSON object string.
+    AsyncFunction("recordListenerEvent") { event: String, detailsJson: String, promise: Promise ->
+      val context = appContext.reactContext
+        ?: return@AsyncFunction promise.resolve(null)
+      val details = try { org.json.JSONObject(detailsJson) } catch (e: Exception) { org.json.JSONObject() }
+      ListenerEventStore.addJson(context, event, details)
+      promise.resolve(null)
+    }
+
     AsyncFunction("clearListenerEvents") { count: Int, promise: Promise ->
       val context = appContext.reactContext
         ?: return@AsyncFunction promise.resolve(null)

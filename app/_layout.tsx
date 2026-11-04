@@ -1,11 +1,41 @@
 import { useEffect } from 'react';
 import { Stack, router } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Updates from 'expo-updates';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { colors } from '@/constants/theme';
+import { SmsReader } from '../modules/sms-reader/src/index';
+
+// [ADD — Nov 4, TESTING] Records why the app opened on the sign-in screen,
+// in the on-phone listener log (uploaded to background_sync_log after the
+// next login). The 4 Nov auth logs showed three fresh OTP logins in 40
+// minutes with NO failed refresh or logout on the server — so the login is
+// being lost on the phone, and we need to see how.
+function recordAuth(event: string, details: Record<string, unknown>): void {
+  if (Platform.OS !== 'android') return;
+  SmsReader.recordListenerEvent(event, JSON.stringify(details)).catch(() => undefined);
+}
+
+async function loadStoredSession() {
+  // [CHANGE — Nov 4] Was: any getSession() error -> setSession(null), i.e.
+  // an error reading the saved login looked exactly like being signed out,
+  // even though the login was still saved. Now: record the error and try
+  // once more before giving up.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (!session) recordAuth('auth_no_session_at_start', { attempt });
+      return session;
+    } catch (e) {
+      recordAuth('auth_getsession_failed', { attempt, error: e instanceof Error ? e.message : String(e) });
+      if (attempt === 1) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  return null;
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -53,12 +83,9 @@ export default function RootLayout() {
   }, [isUpdatePending]);
 
   useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data: { session } }) => {
+    loadStoredSession()
+      .then((session) => {
         setSession(session);
-      })
-      .catch(() => {
-        setSession(null);
       })
       .finally(() => {
         SplashScreen.hideAsync();

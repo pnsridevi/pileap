@@ -27,7 +27,8 @@ import androidx.work.workDataOf
 //      promos and other noise stop here.
 //   3. Records "listener_sms_received" (no SMS text, no phone numbers).
 //   4. For bank SMS, starts ONE ListenerSyncWorker. Unique work + KEEP: the
-//      2–3 SMS a bank sends for one payment join the same job.
+//      2–3 SMS a bank sends for one payment join the same job. A job still
+//      pending after 2 minutes is treated as stuck and replaced (build 2).
 //
 // Pileap Dev only: an SMS from a normal phone number containing PILEAPTEST
 // starts the job too, to test the chain without a payment. (It won't
@@ -39,6 +40,10 @@ class SmsListenerReceiver : BroadcastReceiver() {
   companion object {
     const val UNIQUE_WORK = "pileap-sms-listener-sync"
     private const val TEST_KEYWORD = "pileaptest"
+    // [ADD — build 2] A job normally finishes within ~1 minute. One that's
+    // still pending after this long is stuck (frozen, killed, retrying) and
+    // is replaced instead of silently swallowing every new SMS.
+    private const val STALE_JOB_MS = 2 * 60 * 1000L
   }
 
   override fun onReceive(context: Context, intent: Intent) {
@@ -98,8 +103,21 @@ class SmsListenerReceiver : BroadcastReceiver() {
         .setInputData(workDataOf("enqueued_at" to receivedAt))
         .build()
 
+      // [CHANGE — build 2] KEEP joins the job of the same payment's earlier
+      // SMS. But a job stuck for minutes used to block every later SMS too,
+      // so a stale one is now replaced.
+      val lastEnqueued = ListenerEventStore.lastEnqueuedAt(context)
+      val stale = lastEnqueued == 0L || receivedAt - lastEnqueued > STALE_JOB_MS
+      val policy = if (stale) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+      if (stale) ListenerEventStore.setLastEnqueuedAt(context, receivedAt)
+
+      ListenerEventStore.add(context, "listener_job_enqueued", mapOf(
+        "policy" to (if (stale) "replace" else "keep"),
+        "previous_age_ms" to (if (lastEnqueued == 0L) null else receivedAt - lastEnqueued)
+      ))
+
       WorkManager.getInstance(context.applicationContext)
-        .enqueueUniqueWork(UNIQUE_WORK, ExistingWorkPolicy.KEEP, request)
+        .enqueueUniqueWork(UNIQUE_WORK, policy, request)
     } catch (e: Exception) {
       ListenerEventStore.add(context, "listener_error", mapOf(
         "where" to "receiver",

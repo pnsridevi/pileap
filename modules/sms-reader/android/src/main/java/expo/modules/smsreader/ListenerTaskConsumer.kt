@@ -55,9 +55,11 @@ class ListenerTaskConsumer(context: Context?, taskManagerUtils: TaskManagerUtils
 
 /** Runs the registered JS listener task and waits for it to finish. */
 internal object ListenerTaskRunner {
-  // A sync normally takes a few seconds. WorkManager stops a job after
-  // 10 minutes, so give up well before that.
-  private const val TIMEOUT_MS = 4 * 60 * 1000L
+  // A sync normally takes a few seconds (the 06:41 hourly run on 3–4 Nov
+  // took 4 s). [CHANGE — build 2] Was 4 minutes. Android stops urgent jobs
+  // after ~1 minute once an app has repeatedly timed out, so give up at
+  // 40 s and record "timeout" ourselves before Android kills the job.
+  private const val TIMEOUT_MS = 40 * 1000L
 
   /**
    * Returns "finished", "timeout", "not_registered" (the app hasn't been
@@ -75,6 +77,9 @@ internal object ListenerTaskRunner {
       ?: return "not_registered"
 
     val done = CompletableDeferred<Unit>()
+    // [ADD — build 2] Trace: if "execute_called" appears but the JS side
+    // never records its own first step, the headless JS start is what hangs.
+    ListenerEventStore.add(context, "listener_job_step", mapOf("step" to "execute_called"))
     consumer.execute { done.complete(Unit) }
 
     return if (withTimeoutOrNull(TIMEOUT_MS) { done.await() } != null) "finished" else "timeout"

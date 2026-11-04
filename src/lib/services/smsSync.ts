@@ -139,10 +139,42 @@ export type SyncProgressListener = (update: SyncProgressUpdate) => void;
 type SyncStatusListener = (syncing: boolean) => void;
 const syncStatusListeners = new Set<SyncStatusListener>();
 let syncInProgress = false;
+// [ADD — build 2] Each run gets a token, so only the run that set "syncing"
+// can clear it, and a background run that freezes can't keep the Sync screen
+// showing "Syncing…" (button disabled) forever. On 4 Nov background runs
+// froze midway; when that happens in the same copy of the app the user has
+// on screen, Sync Now (sync.tsx checks syncingAnywhere first) was blocked
+// until the app was fully closed. After BG_STATUS_TIMEOUT_MS a background
+// run is reported as finished to the UI, and the lock takeover below lets
+// the foreground sync proceed.
+let syncRunToken = 0;
+let bgStatusTimer: ReturnType<typeof setTimeout> | null = null;
+const BG_STATUS_TIMEOUT_MS = 60 * 1000;
 
-function setSyncInProgress(value: boolean): void {
+function notifySyncStatus(value: boolean): void {
   syncInProgress = value;
   syncStatusListeners.forEach((l) => l(value));
+}
+
+/** Marks a run as started; returns its token for endSyncRun(). */
+function startSyncRun(owner: 'fg' | 'bg'): number {
+  const token = ++syncRunToken;
+  if (bgStatusTimer) { clearTimeout(bgStatusTimer); bgStatusTimer = null; }
+  if (owner === 'bg') {
+    bgStatusTimer = setTimeout(() => {
+      bgStatusTimer = null;
+      if (syncRunToken === token && syncInProgress) notifySyncStatus(false);
+    }, BG_STATUS_TIMEOUT_MS);
+  }
+  notifySyncStatus(true);
+  return token;
+}
+
+/** Marks a run as finished — only if no newer run has started since. */
+function endSyncRun(token: number): void {
+  if (token !== syncRunToken) return;
+  if (bgStatusTimer) { clearTimeout(bgStatusTimer); bgStatusTimer = null; }
+  notifySyncStatus(false);
 }
 
 /** Current sync-in-progress state, read synchronously — for an initial
@@ -218,6 +250,14 @@ const LOCK_KEY_PREFIX = 'pileap:syncLock:';
 // run blocks new syncs a few minutes longer) is far smaller than the cost
 // of it being too tight (two runs racing and double-processing).
 const LOCK_STALE_MS = 5 * 60 * 1000;
+// [ADD — build 2] A background sync (hourly task / SMS listener) normally
+// finishes in well under a minute. On ColorOS we saw background runs freeze
+// midway and keep the lock, so every app-open sync and Sync Now for the next
+// 5 minutes skipped itself and showed 0. A foreground sync now takes over a
+// background-held lock older than this. (If the frozen run later resumes,
+// the existing duplicate checks in ingestParsedMessages() handle the overlap.)
+const BG_LOCK_TAKEOVER_MS = 60 * 1000;
+type LockOwner = 'fg' | 'bg';
 
 const EMPTY_RESULT: SmsSyncResult = {
   transactionsInserted: 0, balancesUpdated: 0, duplicatesSkipped: 0,
@@ -332,32 +372,64 @@ async function setScanWatermark(userId: string, when: Date): Promise<void> {
  * in a loop, since the other run will finish on its own. A stale lock
  * (older than LOCK_STALE_MS — left behind by a force-close/crash that
  * never reached releaseLock()) is treated as abandoned and overwritten. */
-async function acquireLock(userId: string): Promise<boolean> {
+/** Returns this run's lock id if acquired (pass it to releaseLock), or null
+ * if another sync holds the lock. */
+async function acquireLock(userId: string, owner: LockOwner): Promise<string | null> {
   const key = LOCK_KEY_PREFIX + userId;
   try {
     const existing = await AsyncStorage.getItem(key);
     if (existing) {
-      const lockedAt = Number(existing);
-      if (!Number.isNaN(lockedAt) && Date.now() - lockedAt < LOCK_STALE_MS) {
-        return false; // genuinely in progress elsewhere
+      // [CHANGE — build 2] Lock value is now JSON {at, owner}. A bare number
+      // is the old format (owner unknown, treated as foreground).
+      let lockedAt = NaN;
+      let lockOwner: LockOwner = 'fg';
+      try {
+        const parsed = JSON.parse(existing);
+        if (typeof parsed === 'number') {
+          lockedAt = parsed;
+        } else if (parsed && typeof parsed.at === 'number') {
+          lockedAt = parsed.at;
+          lockOwner = parsed.owner === 'bg' ? 'bg' : 'fg';
+        }
+      } catch {
+        lockedAt = Number(existing);
       }
-      // stale — previous run never released it (crash/force-close mid-sync)
+      const age = Date.now() - lockedAt;
+      if (!Number.isNaN(lockedAt) && age < LOCK_STALE_MS) {
+        const canTakeOver = owner === 'fg' && lockOwner === 'bg' && age > BG_LOCK_TAKEOVER_MS;
+        if (!canTakeOver) return null; // genuinely in progress elsewhere
+      }
+      // stale, or a stuck background run — take it over
     }
-    await AsyncStorage.setItem(key, String(Date.now()));
-    return true;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await AsyncStorage.setItem(key, JSON.stringify({ at: Date.now(), owner, id }));
+    return id;
   } catch (e) {
     // A lock we can't read/write is a lock we can't trust — fail OPEN
     // (proceed without it) rather than permanently blocking sync because
     // of an unrelated AsyncStorage problem. Worst case without a working
     // lock is the same race this lock exists to reduce, not a new one.
     console.warn('smsSync: sync lock read/write failed, proceeding without it:', e instanceof Error ? e.message : e);
-    return true;
+    return 'unlocked';
   }
 }
 
-async function releaseLock(userId: string): Promise<void> {
+// [CHANGE — build 2] Only removes the lock if it's still this run's. A
+// background run that froze, had its lock taken over by the foreground, and
+// then woke up must not delete the foreground run's lock.
+async function releaseLock(userId: string, lockId: string): Promise<void> {
   try {
-    await AsyncStorage.removeItem(LOCK_KEY_PREFIX + userId);
+    const key = LOCK_KEY_PREFIX + userId;
+    const existing = await AsyncStorage.getItem(key);
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing);
+        if (parsed && typeof parsed === 'object' && parsed.id && parsed.id !== lockId) return;
+      } catch {
+        // old/unknown format — fall through and remove it
+      }
+    }
+    await AsyncStorage.removeItem(key);
   } catch (e) {
     // Non-fatal — worst case the next run sees a stale lock and waits out
     // LOCK_STALE_MS before proceeding, same as any other abandoned lock.
@@ -517,8 +589,10 @@ export async function syncRecentSmsMessages(
     return { ...EMPTY_RESULT, skippedDeferredFirstSync: true };
   }
 
-  const acquired = await acquireLock(userId);
-  if (!acquired) {
+  // Background callers (hourly task, SMS listener) pass allowFullBackfill =
+  // false; foreground callers (app open, Sync Now) use the default true.
+  const lockId = await acquireLock(userId, allowFullBackfill ? 'fg' : 'bg');
+  if (!lockId) {
     return { ...EMPTY_RESULT, skippedConcurrentSync: true };
   }
 
@@ -526,7 +600,7 @@ export async function syncRecentSmsMessages(
   // file. Wraps only the actual work (not the lock/watermark bookkeeping
   // around it), so subscribers see "syncing" for exactly as long as real
   // work is happening.
-  setSyncInProgress(true);
+  const runToken = startSyncRun(allowFullBackfill ? 'fg' : 'bg');
   try {
     let fromDays = FULL_WINDOW_DAYS;
     if (lastSyncedAt) {
@@ -585,7 +659,7 @@ export async function syncRecentSmsMessages(
     await setLastSyncResult(userId, result);
     return result;
   } finally {
-    await releaseLock(userId);
-    setSyncInProgress(false);
+    await releaseLock(userId, lockId);
+    endSyncRun(runToken);
   }
 }

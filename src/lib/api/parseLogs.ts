@@ -44,14 +44,23 @@ export async function syncParseLogs(logs: ParseLogs): Promise<ParseLogSyncResult
   // [FIX-shaped note, matching the existing convention in test-sms.tsx's
   // matchContext fetch] If we can't resolve the current user, degrade to
   // "log sync silently skipped" — never throw, never block the caller.
+  //
+  // [FIX — Nov 4] Was supabase.auth.getUser(), which asks Supabase's auth
+  // server over the network every time. smsSync.ts already moved off it for
+  // the same reason: in background runs (hourly task, and now the SMS
+  // listener, which will be most syncs) that call can be slow or fail, and
+  // this function then skipped BOTH logs without telling anyone.
+  // getSession() reads the stored session (refreshing it if expired), the
+  // same call smsSync.ts and backgroundSyncLog.ts use. RLS on both tables
+  // (auth.uid() = user_id) still checks the user on the server.
   let userId: string;
   try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       result.errors.push('syncParseLogs: no authenticated user — skipped');
       return result;
     }
-    userId = data.user.id;
+    userId = session.user.id;
   } catch (e: any) {
     result.errors.push(`syncParseLogs: auth lookup failed — ${e?.message ?? e}`);
     return result;

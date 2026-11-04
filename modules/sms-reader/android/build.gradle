@@ -11,8 +11,17 @@ android {
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
+    consumerProguardFiles("proguard-rules.pro")
   }
   lintOptions {
     abortOnError false
   }
+}
+
+dependencies {
+  // [ADD — Nov 4] SMS listener's background job. Same version
+  // expo-background-task 1.0.10 uses, so nothing new is added to the app.
+  // (TaskConsumer/TaskServiceProviderHelper come from expo-modules-core,
+  // which every Expo module already gets.)
+  implementation "androidx.work:work-runtime-ktx:2.9.1"
 }

@@ -102,6 +102,8 @@ import { fetchCustomCategories } from '@/lib/api/customCategories';
 import { syncParseLogs } from '@/lib/api/parseLogs';
 import { supabase } from '@/lib/supabase';
 import { prepareRemoteRuleset, flushShadowReport } from '@/lib/rulesetStore';
+// [ADD — Nov 4] See the syncParseLogs() call below.
+import { logBackgroundSyncEvent } from '@/lib/api/backgroundSyncLog';
 
 // [ADD — this pass] Staged progress reporting, replacing the flat
 // (processed, total) callback from the previous pass. A bare chunk
@@ -435,8 +437,22 @@ export async function syncSmsMessages(
   // Log sync failures never fail the overall sync — same convention as
   // the debug flow's syncToSupabase(), which fires this after the ingest
   // Alert regardless of ingest outcome.
+  //
+  // [FIX — Nov 4] syncParseLogs() never throws: it reports problems in
+  // its returned `errors` list, which was ignored here. So a rejected
+  // haiku_candidate_log / low_confidence_log write (RLS, constraint, no
+  // session) vanished without a trace. Now recorded in background_sync_log
+  // as 'parse_logs_failed' — counts and error text only, never SMS text.
   try {
-    await syncParseLogs(logs);
+    const logResult = await syncParseLogs(logs);
+    if (logResult.errors.length > 0) {
+      console.warn('smsSync: syncParseLogs reported errors:', logResult.errors);
+      await logBackgroundSyncEvent('parse_logs_failed', {
+        errors: logResult.errors.slice(0, 5),
+        haiku_candidates: logs.haikuCandidates.length,
+        low_confidence: logs.lowConfidence.length,
+      });
+    }
   } catch (e) {
     console.warn('smsSync: syncParseLogs failed:', e instanceof Error ? e.message : e);
   }

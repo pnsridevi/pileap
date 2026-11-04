@@ -21,6 +21,17 @@ declare class SmsReaderModule extends NativeModule<{}> {
 
   // Returns true if READ_SMS permission is granted
   hasPermission(): Promise<boolean>;
+
+  // [ADD — Nov 4] SMS listener.
+  // Connects a JS task (TaskManager.defineTask) to the native listener so
+  // it runs after each bank SMS. Safe to call on every app start.
+  registerListenerTask(taskName: string): Promise<void>;
+
+  // Listener events recorded on the phone by the native receiver/job
+  // (JSON array string). Upload them, then clear that many.
+  // See flushListenerEvents() in src/lib/api/backgroundSyncLog.ts.
+  peekListenerEvents(): Promise<string>;
+  clearListenerEvents(count: number): Promise<void>;
 }
 
 export default requireNativeModule<SmsReaderModule>('SmsReader');

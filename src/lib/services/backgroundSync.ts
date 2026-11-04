@@ -38,13 +38,17 @@
  *   npm uninstall expo-background-fetch
  * (native change — needs a new EAS build, not just eas update)
  */
+import { PermissionsAndroid, Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundTask from 'expo-background-task';
 import { syncRecentSmsMessages } from './smsSync';
 // [TESTING]
-import { logBackgroundSyncEvent } from '@/lib/api/backgroundSyncLog';
+import { logBackgroundSyncEvent, flushListenerEvents } from '@/lib/api/backgroundSyncLog';
+import { SmsReader } from '../../../modules/sms-reader/src/index';
 
 export const BACKGROUND_SYNC_TASK = 'pileap-background-sms-sync-v2';
+// [ADD — Nov 4] Run by the native SMS listener ~20 s after a bank SMS.
+export const SMS_LISTENER_TASK = 'pileap-sms-listener-sync';
 const OLD_BACKGROUND_SYNC_TASK = 'pileap-background-sms-sync';
 
 // Minutes. expo-background-task takes minutes (not seconds like
@@ -57,6 +61,8 @@ const MINIMUM_INTERVAL_MINUTES = 60;
 TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   // [TESTING] Logged first, before anything can throw.
   await logBackgroundSyncEvent('task_invoked');
+  // [ADD — Nov 4] Upload any SMS listener events recorded since last time.
+  await flushListenerEvents();
 
   try {
     // false: never do the heavy first-ever 90-day sync in the background;
@@ -92,9 +98,64 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
 });
 
 /**
+ * [ADD — Nov 4] SMS listener task. The native receiver catches each bank
+ * SMS; ~20 seconds later its job runs this task (headless if the app is
+ * closed, in the live app if it's open). Same sync as the hourly task and
+ * Sync Now — syncRecentSmsMessages() keeps its own lock, so it's safe if
+ * another sync is already running.
+ */
+TaskManager.defineTask(SMS_LISTENER_TASK, async () => {
+  // [TESTING]
+  await logBackgroundSyncEvent('listener_sync_invoked');
+  await flushListenerEvents();
+
+  try {
+    const result = await syncRecentSmsMessages(false);
+
+    if (result.skippedDeferredFirstSync || result.skippedConcurrentSync) {
+      // [TESTING]
+      await logBackgroundSyncEvent('listener_sync_no_data', {
+        reason: result.skippedDeferredFirstSync ? 'deferred_first_sync' : 'concurrent_sync',
+      });
+      return;
+    }
+
+    const hadNewData = result.transactionsInserted > 0 || result.balancesUpdated > 0;
+    // [TESTING]
+    await logBackgroundSyncEvent(hadNewData ? 'listener_sync_succeeded' : 'listener_sync_no_data', {
+      transactionsInserted: result.transactionsInserted,
+      balancesUpdated: result.balancesUpdated,
+    });
+  } catch (e) {
+    // [TESTING]
+    await logBackgroundSyncEvent('listener_sync_failed', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+    console.warn('SMS listener sync failed:', e instanceof Error ? e.message : e);
+  }
+});
+
+/**
  * Call once on app startup (app/(app)/_layout.tsx). Safe on every launch.
  */
 export async function registerBackgroundSyncAsync(): Promise<void> {
+  // [ADD — Nov 4] SMS listener: make sure RECEIVE_SMS is granted, connect
+  // the listener task, and upload any listener events recorded while the
+  // app was closed. All best-effort; none of them block the hourly task.
+  await ensureReceiveSmsPermission();
+  if (Platform.OS === 'android') {
+    try {
+      await SmsReader.registerListenerTask(SMS_LISTENER_TASK);
+    } catch (e) {
+      // [TESTING]
+      await logBackgroundSyncEvent('registration_failed', {
+        task: SMS_LISTENER_TASK,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  await flushListenerEvents();
+
   // Best-effort cleanup of the old expo-background-fetch registration.
   try {
     if (await TaskManager.isTaskRegisteredAsync(OLD_BACKGROUND_SYNC_TASK)) {
@@ -132,6 +193,27 @@ export async function registerBackgroundSyncAsync(): Promise<void> {
       error: e instanceof Error ? e.message : String(e),
     });
     throw e;
+  }
+}
+
+/**
+ * [ADD — Nov 4] Android only delivers incoming SMS to apps holding
+ * RECEIVE_SMS. It's in the same group as READ_SMS, so once READ_SMS is
+ * allowed Android grants it without showing a dialog — but the app still
+ * has to ask. Does nothing until READ_SMS is allowed, so this never shows
+ * an SMS prompt on its own.
+ */
+async function ensureReceiveSmsPermission(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    const P = PermissionsAndroid.PERMISSIONS;
+    if (!(await PermissionsAndroid.check(P.READ_SMS))) return;
+    if (await PermissionsAndroid.check(P.RECEIVE_SMS)) return;
+    const result = await PermissionsAndroid.request(P.RECEIVE_SMS);
+    // [TESTING]
+    await logBackgroundSyncEvent('listener_permission', { receive_sms: result });
+  } catch (e) {
+    console.warn('RECEIVE_SMS check failed:', e instanceof Error ? e.message : e);
   }
 }
 
